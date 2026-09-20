@@ -1,0 +1,52 @@
+name: GCamStyle iOS Cloud Build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Unpack app project
+        run: |
+          rm -rf build
+          mkdir -p build
+          unzip -q GCamStyle_iOS_Pro_1.0_iPhoneBuild.zip -d build
+          test -f build/GCamStyleiOS.xcodeproj/project.pbxproj
+
+      - name: Show Xcode
+        run: |
+          xcodebuild -version
+          xcode-select -p
+
+      - name: Build unsigned archive
+        working-directory: build
+        run: |
+          xcodebuild \
+            -project GCamStyleiOS.xcodeproj \
+            -scheme GCamStyleiOS \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/GCamStyle.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            archive
+
+      - name: Package IPA
+        run: |
+          rm -rf Payload GCamStyle-iOS-unsigned.ipa
+          mkdir Payload
+          cp -R "$RUNNER_TEMP/GCamStyle.xcarchive/Products/Applications/GCamStyleiOS.app" Payload/
+          /usr/bin/zip -qry GCamStyle-iOS-unsigned.ipa Payload
+          ls -lh GCamStyle-iOS-unsigned.ipa
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: GCamStyle-iOS-IPA
+          path: GCamStyle-iOS-unsigned.ipa
+          if-no-files-found: error
