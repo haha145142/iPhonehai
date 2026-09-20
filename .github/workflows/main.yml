@@ -9,42 +9,55 @@ on:
 jobs:
   build:
     name: Build unsigned IPA
-    runs-on: macos-14
+    runs-on: macos-15
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Show Xcode
+      - name: Show Xcode and SDK
         run: |
           xcodebuild -version
           xcode-select -p
+          xcodebuild -showsdks | grep -E 'iphoneos|iphonesimulator' || true
 
-      - name: Validate Xcode project
+      - name: Validate project files
         run: |
           test -f GCamStyle.xcodeproj/project.pbxproj
           test -f GCamStyle.xcodeproj/xcshareddata/xcschemes/GCamStyle.xcscheme
           test -f GCamStyle/GCamStyle.swift
           test -f GCamStyle/Info.plist
+          xcodebuild -project GCamStyle.xcodeproj -list
 
-      - name: Archive iOS app
+      - name: Build device app without signing
         run: |
+          rm -rf "$RUNNER_TEMP/GCamDerivedData"
           xcodebuild \
             -project GCamStyle.xcodeproj \
             -scheme GCamStyle \
             -configuration Release \
             -sdk iphoneos \
-            -destination 'generic/platform=iOS' \
-            -archivePath "$RUNNER_TEMP/GCamStyle.xcarchive" \
+            -derivedDataPath "$RUNNER_TEMP/GCamDerivedData" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
-            archive
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            AD_HOC_CODE_SIGNING_ALLOWED=NO \
+            build
 
-      - name: Package IPA
+      - name: Locate app
+        run: |
+          APP="$RUNNER_TEMP/GCamDerivedData/Build/Products/Release-iphoneos/GCamStyle.app"
+          test -d "$APP"
+          /usr/bin/file "$APP/GCamStyle"
+          echo "APP=$APP" >> "$GITHUB_ENV"
+
+      - name: Package unsigned IPA
         run: |
           rm -rf Payload GCamStyle-iOS-unsigned.ipa
           mkdir Payload
-          cp -R "$RUNNER_TEMP/GCamStyle.xcarchive/Products/Applications/GCamStyle.app" Payload/
+          cp -R "$APP" Payload/
           /usr/bin/zip -qry GCamStyle-iOS-unsigned.ipa Payload
           ls -lh GCamStyle-iOS-unsigned.ipa
 
