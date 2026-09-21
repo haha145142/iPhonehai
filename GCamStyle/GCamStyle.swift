@@ -1048,13 +1048,17 @@ enum AGCProfileLibrary {
             darkerExposure: nil,
             tonePreset: d.toneCurvePreset,
             gammaPreset: Int(d.gamma.rounded()),
+            gammaCurvePreset: d.gammaCurvePreset,
+            sectCurvePreset: d.sectCurvePreset,
+            tone: d.tone,
+            gamma: d.gamma,
             lutIndex: d.lutIndex,
             toneCurve: [],
             gammaCurve: []
         )
 
         return CameraPreset(
-            id: "builtin-shadowchasing-(d.index)",
+            id: "builtin-shadowchasing-\(d.index)",
             brand: "AGC",
             model: d.title,
             lens: "影踪追寻 · 通用配置",
