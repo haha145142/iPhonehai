@@ -292,10 +292,6 @@ struct AGCRenderProfile: Hashable, Sendable {
 
     let tonePreset: Int?
     let gammaPreset: Int?
-    let gammaCurvePreset: Int?
-    let sectCurvePreset: Int?
-    let tone: Float
-    let gamma: Float
     let lutIndex: Int?
 
     // 自定义 AGC 曲线的原始采样。
@@ -394,7 +390,6 @@ struct CameraPreset: Identifiable, Hashable, Sendable {
         case "FUJIFILM": return "富士"
         case "RICOH": return "理光"
         case "PANASONIC": return "松下"
-        case "AGC": return "安卓配置"
         case "SIGMA": return "适马"
         default: return brand
         }
@@ -796,10 +791,10 @@ enum AGCMapper {
     private static func curve(for config: AGCConfig, profile: Int, cameraIndex: Int = 0) -> (tone: [Float], gamma: [Float]) {
         for customIndex in 1...10 {
             for slotIndex in 0...5 {
-                let enabledKey = "lib_custom_\(customIndex)_key_p\(profile)_\(slotIndex)_enabled"
+                let enabledKey = "lib_custom_(custom)_key_p(profile)_(slot)_enabled"
                 guard config.string(enabledKey) == "1" else { continue }
-                let title = config.string("lib_custom_\(customIndex)_key_p\(profile)_\(slotIndex)_title") ?? ""
-                let value = config.string("lib_custom_\(customIndex)_key_p\(profile)_\(slotIndex)_value") ?? ""
+                let title = config.string("lib_custom_(custom)_key_p(profile)_(slot)_title") ?? ""
+                let value = config.string("lib_custom_(custom)_key_p(profile)_(slot)_value") ?? ""
                 if !value.isEmpty {
                     return AGCCurveDecoder.decode(hex: value, title: title)
                 }
@@ -808,9 +803,9 @@ enum AGCMapper {
 
         // Some configs keep the active curve in a camera-specific slot.
         for slot in 0...5 {
-            let value = config.string("lib_custom_1_key_p\(profile)_\(slot)_value") ?? ""
+            let value = config.string("lib_custom_1_key_p(profile)_(slot)_value") ?? ""
             if !value.isEmpty {
-                let title = config.string("lib_custom_1_key_p\(profile)_\(slot)_title") ?? ""
+                let title = config.string("lib_custom_1_key_p(profile)_(slot)_title") ?? ""
                 return AGCCurveDecoder.decode(hex: value, title: title)
             }
         }
@@ -926,10 +921,6 @@ enum AGCMapper {
                 darkerExposure: darker.map(Float.init),
                 tonePreset: tonePreset,
                 gammaPreset: gammaPreset,
-                gammaCurvePreset: firstInt(config, ["lib_gamma_curve_preset_key"], profile: index),
-                sectCurvePreset: firstInt(config, ["lib_sect_curve_preset_key"], profile: index),
-                tone: Float(tone),
-                gamma: Float(gamma),
                 lutIndex: lutIndex,
                 toneCurve: curves.tone,
                 gammaCurve: curves.gamma
@@ -977,113 +968,6 @@ enum AGCMapper {
     }
 }
 
-struct AGCProfileDefinition: Sendable {
-    let index: Int
-    let title: String
-    let toneCurvePreset: Int?
-    let gammaCurvePreset: Int?
-    let sectCurvePreset: Int?
-    let tone: Float
-    let gamma: Float
-    let saturation: Float
-    let red: Float
-    let green: Float
-    let blue: Float
-    let hdrPlus: Float
-    let hdrMinus: Float
-    let denoise: Float
-    let sharp: Float
-    let frameCount: Int
-    let zslFrameCount: Int
-    let nsFrameCount: Int
-    let noiseModelEnabled: Bool
-    let lutIndex: Int
-}
-
-enum AGCProfileLibrary {
-    private static let definitions: [AGCProfileDefinition] = [
-        .init(index: 0, title: "标准低噪 🖼", toneCurvePreset: 8, gammaCurvePreset: 3, sectCurvePreset: 3, tone: 15, gamma: 8, saturation: 1.00, red: 1.00, green: 1.00, blue: 1.00, hdrPlus: 5.0, hdrMinus: -3.0, denoise: 0.875, sharp: 0.4375, frameCount: 20, zslFrameCount: 50, nsFrameCount: 28, noiseModelEnabled: true, lutIndex: 0),
-        .init(index: 1, title: "柔和细节 🍄", toneCurvePreset: 19, gammaCurvePreset: 7, sectCurvePreset: 2, tone: 23, gamma: 11, saturation: 1.00, red: 1.00, green: 1.00, blue: 1.00, hdrPlus: 13.5, hdrMinus: -1.25, denoise: 0.75, sharp: 0.30, frameCount: 28, zslFrameCount: 50, nsFrameCount: 28, noiseModelEnabled: false, lutIndex: 0),
-        .init(index: 2, title: "亮丽HDR 🌅", toneCurvePreset: nil, gammaCurvePreset: 7, sectCurvePreset: 3, tone: 14, gamma: 7, saturation: 1.00, red: 1.00, green: 1.00, blue: 1.00, hdrPlus: 14.5, hdrMinus: -3.5, denoise: 0.65, sharp: 0.30, frameCount: 50, zslFrameCount: 50, nsFrameCount: 28, noiseModelEnabled: true, lutIndex: 0),
-        .init(index: 3, title: "夜色花火 🎆", toneCurvePreset: nil, gammaCurvePreset: nil, sectCurvePreset: nil, tone: 10, gamma: 9, saturation: 1.00, red: 1.00, green: 1.00, blue: 1.00, hdrPlus: 11.0, hdrMinus: -4.0, denoise: 0.80, sharp: 0.375, frameCount: 35, zslFrameCount: 50, nsFrameCount: 28, noiseModelEnabled: true, lutIndex: 0),
-        .init(index: 4, title: "数码CCD 📸", toneCurvePreset: 8, gammaCurvePreset: 3, sectCurvePreset: nil, tone: 8, gamma: 3, saturation: 1.15, red: 1.04, green: 1.06, blue: 1.26, hdrPlus: 15.0, hdrMinus: -0.875, denoise: 0.75, sharp: 0.50, frameCount: 50, zslFrameCount: 50, nsFrameCount: 28, noiseModelEnabled: false, lutIndex: 0),
-        .init(index: 5, title: "运动抓拍 🚴‍♂️", toneCurvePreset: 8, gammaCurvePreset: 3, sectCurvePreset: 3, tone: 32, gamma: 11, saturation: 1.00, red: 0.92, green: 1.02, blue: 1.00, hdrPlus: 14.5, hdrMinus: -2.0, denoise: 0.50, sharp: 0.125, frameCount: 5, zslFrameCount: 7, nsFrameCount: 5, noiseModelEnabled: false, lutIndex: 0),
-        .init(index: 6, title: "鲜艳徕卡 🌈", toneCurvePreset: 8, gammaCurvePreset: 3, sectCurvePreset: 3, tone: 16, gamma: 8, saturation: 1.10, red: 1.02, green: 1.00, blue: 0.96, hdrPlus: 14.5, hdrMinus: -1.25, denoise: 0.50, sharp: 0.50, frameCount: 50, zslFrameCount: 50, nsFrameCount: 28, noiseModelEnabled: true, lutIndex: 0),
-        .init(index: 7, title: "复古徕卡 📽", toneCurvePreset: 19, gammaCurvePreset: 7, sectCurvePreset: 2, tone: 17, gamma: 8, saturation: 0.90, red: 1.04, green: 1.02, blue: 1.04, hdrPlus: 3.5, hdrMinus: -2.0, denoise: 0.50, sharp: 0.34, frameCount: 24, zslFrameCount: 40, nsFrameCount: 24, noiseModelEnabled: false, lutIndex: 0),
-        .init(index: 8, title: "金属徕卡 ⚓️", toneCurvePreset: nil, gammaCurvePreset: nil, sectCurvePreset: nil, tone: 2, gamma: 3, saturation: 1.00, red: 1.08, green: 1.00, blue: 0.92, hdrPlus: 10.5, hdrMinus: -0.25, denoise: 0.875, sharp: 0.50, frameCount: 40, zslFrameCount: 50, nsFrameCount: 28, noiseModelEnabled: true, lutIndex: 0),
-        .init(index: 9, title: "糖果轻颜 🧝‍♀️", toneCurvePreset: nil, gammaCurvePreset: 7, sectCurvePreset: 3, tone: 2, gamma: 11, saturation: 1.15, red: 0.94, green: 1.16, blue: 1.12, hdrPlus: 7.0, hdrMinus: -1.75, denoise: 0.62, sharp: 0.50, frameCount: 28, zslFrameCount: 12, nsFrameCount: 28, noiseModelEnabled: true, lutIndex: 0),
-        .init(index: 10, title: "普罗维亚 🌆", toneCurvePreset: 19, gammaCurvePreset: 7, sectCurvePreset: 2, tone: 2, gamma: 8, saturation: 0.85, red: 1.32, green: 1.32, blue: 1.08, hdrPlus: 7.0, hdrMinus: -1.5, denoise: 0.50, sharp: 0.30, frameCount: 32, zslFrameCount: 32, nsFrameCount: 24, noiseModelEnabled: false, lutIndex: 0),
-        .init(index: 11, title: "浪漫电影 🎊", toneCurvePreset: 8, gammaCurvePreset: 3, sectCurvePreset: nil, tone: 28, gamma: 7, saturation: 1.06, red: 1.06, green: 0.84, blue: 0.74, hdrPlus: 14.5, hdrMinus: -1.5, denoise: 0.55, sharp: 0.30, frameCount: 35, zslFrameCount: 50, nsFrameCount: 28, noiseModelEnabled: false, lutIndex: 0),
-        .init(index: 12, title: "暗调负片 🎞", toneCurvePreset: 19, gammaCurvePreset: 7, sectCurvePreset: 2, tone: 18, gamma: 9, saturation: 0.75, red: 0.98, green: 0.80, blue: 1.18, hdrPlus: 10.5, hdrMinus: 1.25, denoise: 0.50, sharp: 0.30, frameCount: 32, zslFrameCount: 40, nsFrameCount: 28, noiseModelEnabled: false, lutIndex: 0),
-        .init(index: 13, title: "柯达多彩 🌸", toneCurvePreset: 19, gammaCurvePreset: 7, sectCurvePreset: 2, tone: 20, gamma: 8, saturation: 1.00, red: 0.80, green: 1.00, blue: 0.80, hdrPlus: 3.5, hdrMinus: -9.0, denoise: 0.50, sharp: 0.30, frameCount: 30, zslFrameCount: 40, nsFrameCount: 24, noiseModelEnabled: false, lutIndex: 0),
-        .init(index: 14, title: "日光胶片 ☀️", toneCurvePreset: 19, gammaCurvePreset: 7, sectCurvePreset: 2, tone: 17, gamma: 8, saturation: 0.75, red: 0.94, green: 1.16, blue: 1.14, hdrPlus: 16.0, hdrMinus: -0.625, denoise: 0.50, sharp: 0.20, frameCount: 32, zslFrameCount: 40, nsFrameCount: 24, noiseModelEnabled: false, lutIndex: 0),
-        .init(index: 15, title: "LUT+超细节", toneCurvePreset: 19, gammaCurvePreset: 7, sectCurvePreset: 2, tone: 18, gamma: 8, saturation: 1.00, red: 1.00, green: 1.00, blue: 1.00, hdrPlus: 5.5, hdrMinus: -1.5, denoise: 0.50, sharp: 0.50, frameCount: 50, zslFrameCount: 50, nsFrameCount: 28, noiseModelEnabled: false, lutIndex: 0),
-        .init(index: 16, title: "LUT+低动态", toneCurvePreset: 19, gammaCurvePreset: 7, sectCurvePreset: 2, tone: 15, gamma: 8, saturation: 0.90, red: 1.00, green: 1.00, blue: 1.00, hdrPlus: 6.5, hdrMinus: -0.375, denoise: 0.875, sharp: 0.50, frameCount: 40, zslFrameCount: 40, nsFrameCount: 24, noiseModelEnabled: false, lutIndex: 0),
-        .init(index: 17, title: "LUT+高动态", toneCurvePreset: 19, gammaCurvePreset: 7, sectCurvePreset: 2, tone: 22, gamma: 1, saturation: 1.15, red: 1.00, green: 1.00, blue: 1.00, hdrPlus: 6.0, hdrMinus: -2.0, denoise: 0.875, sharp: 0.375, frameCount: 40, zslFrameCount: 40, nsFrameCount: 24, noiseModelEnabled: false, lutIndex: 0)
-    ]
-
-    static let shadowChasing: [CameraPreset] = definitions.map { d in
-        let warmth = max(-12, min(12, Double(d.red - d.blue) * 7.5))
-        let tint = max(-8, min(8, Double(d.green - (d.red + d.blue) / 2) * 6))
-        let contrast = Float(max(0.78, min(1.35, 0.95 + Double(d.toneCurvePreset == 19 ? 0.06 : 0.0) + abs(Double(d.hdrMinus)) * 0.012)))
-        let exposure = Float(max(-0.55, min(0.55, (Double(d.tone) - 15.0) * 0.007 + (Double(d.gamma) - 8.0) * 0.004)))
-        let highlights = Float(max(0.18, min(0.88, 0.78 - d.hdrPlus * 0.028)))
-        let shadows = Float(max(0.08, min(0.72, 0.20 + abs(d.hdrMinus) * 0.055)))
-
-        let profile = AGCRenderProfile(
-            index: d.index,
-            title: d.title,
-            red: d.red,
-            green: d.green,
-            blue: d.blue,
-            saturation: d.saturation,
-            contrast2: nil,
-            blackLevel: nil,
-            hdrPlus: d.hdrPlus,
-            hdrMinus: d.hdrMinus,
-            frameCount: d.frameCount,
-            zslFrameCount: d.zslFrameCount,
-            nsFrameCount: d.nsFrameCount,
-            sharpGain: d.sharp,
-            darkerExposure: nil,
-            tonePreset: d.toneCurvePreset,
-            gammaPreset: Int(d.gamma.rounded()),
-            gammaCurvePreset: d.gammaCurvePreset,
-            sectCurvePreset: d.sectCurvePreset,
-            tone: d.tone,
-            gamma: d.gamma,
-            lutIndex: d.lutIndex,
-            toneCurve: [],
-            gammaCurve: []
-        )
-
-        return CameraPreset(
-            id: "builtin-shadowchasing-\(d.index)",
-            brand: "AGC",
-            model: d.title,
-            lens: "影踪追寻 · 通用配置",
-            focal: "主摄",
-            aperture: "自动",
-            iso: "自动",
-            shutter: "自动",
-            style: "安卓配置",
-            exposure: exposure,
-            saturation: d.saturation,
-            contrast: contrast,
-            highlights: highlights,
-            shadows: shadows,
-            sharpness: d.sharp,
-            warmth: Float(warmth),
-            tint: Float(tint),
-            channelBias: 0,
-            exifMake: "安卓配置",
-            exifModel: d.title,
-            watermarkLayout: .verticalLeft,
-            agcProfile: profile
-        )
-    }
-}
-
 //// MARK: - 相机引擎
 
 @MainActor
@@ -1102,11 +986,6 @@ final class CameraEngine: NSObject, ObservableObject {
     @Published var proRAWSupported = false
     @Published var livePhotoSupported = false
     @Published private(set) var previewRotationAngle: CGFloat = 0
-    @Published private(set) var zoomFactor: CGFloat = 1.0
-    @Published var exposureBias: Float = 0
-    @Published var isGridEnabled = true
-    @Published var isFlashEnabled = false
-    @Published var timerSeconds = 0
 
     private var rotationCoordinator: AVCaptureDevice.RotationCoordinator?
     private var previewRotationObservation: NSKeyValueObservation?
@@ -1115,6 +994,7 @@ final class CameraEngine: NSObject, ObservableObject {
 
     private var currentInput: AVCaptureDeviceInput?
     private var delegates: [Int64: CaptureProcessorDelegate] = [:]
+    private var orientationObserver: NSObjectProtocol?
 
     override init() {
         super.init()
@@ -1206,113 +1086,7 @@ final class CameraEngine: NSObject, ObservableObject {
         }
     }
 
-    func setZoom(_ requested: CGFloat) {
-        let requested = min(8.0, max(0.5, requested))
-
-        if requested < 0.75 {
-            if let ultra = AVCaptureDevice.default(.builtInUltraWideCamera, for: .video, position: .back) {
-                switchInput(to: ultra)
-                setDeviceZoom(1.0, on: ultra)
-                zoomFactor = 0.5
-                return
-            }
-        } else if currentInput?.device.deviceType == .builtInUltraWideCamera {
-            if let wide = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) {
-                switchInput(to: wide)
-            }
-        }
-
-        let device = currentInput?.device
-        let maxZoom = device?.maxAvailableVideoZoomFactor ?? 1
-        let target = min(max(requested, device?.minAvailableVideoZoomFactor ?? 1), maxZoom)
-        if let device {
-            setDeviceZoom(target, on: device)
-            zoomFactor = target
-        }
-    }
-
-    private func setDeviceZoom(_ value: CGFloat, on device: AVCaptureDevice) {
-        do {
-            try device.lockForConfiguration()
-            device.videoZoomFactor = min(max(value, device.minAvailableVideoZoomFactor), device.maxAvailableVideoZoomFactor)
-            device.unlockForConfiguration()
-        } catch {
-            errorMessage = "镜头变焦失败。"
-        }
-    }
-
-    private func switchInput(to device: AVCaptureDevice) {
-        guard currentInput?.device.uniqueID != device.uniqueID else { return }
-        guard let input = try? AVCaptureDeviceInput(device: device) else { return }
-
-        session.beginConfiguration()
-        if let old = currentInput {
-            session.removeInput(old)
-        }
-        if session.canAddInput(input) {
-            session.addInput(input)
-            currentInput = input
-        }
-        session.commitConfiguration()
-        updateCameraRotation()
-    }
-
-    func focusAndExpose(at location: CGPoint, in size: CGSize) {
-        guard let device = currentInput?.device, size.width > 0, size.height > 0 else { return }
-
-        // 竖屏后置摄像头坐标：把屏幕坐标转换成 AVCaptureDevice 的归一化坐标。
-        let point = CGPoint(
-            x: min(1, max(0, location.y / size.height)),
-            y: min(1, max(0, 1.0 - location.x / size.width))
-        )
-
-        do {
-            try device.lockForConfiguration()
-
-            if device.isFocusPointOfInterestSupported {
-                device.focusPointOfInterest = point
-                if device.isFocusModeSupported(.autoFocus) {
-                    device.focusMode = .autoFocus
-                } else if device.isFocusModeSupported(.continuousAutoFocus) {
-                    device.focusMode = .continuousAutoFocus
-                }
-            }
-
-            if device.isExposurePointOfInterestSupported {
-                device.exposurePointOfInterest = point
-                if device.isExposureModeSupported(.continuousAutoExposure) {
-                    device.exposureMode = .continuousAutoExposure
-                } else if device.isExposureModeSupported(.autoExpose) {
-                    device.exposureMode = .autoExpose
-                }
-            }
-
-            device.unlockForConfiguration()
-        } catch {
-            errorMessage = "无法锁定当前对焦位置。"
-        }
-    }
-
-    func setExposureBias(_ value: Float) {
-        guard let device = currentInput?.device else { return }
-        let minBias = device.minExposureTargetBias
-        let maxBias = device.maxExposureTargetBias
-        let clamped = min(max(value, minBias), maxBias)
-
-        do {
-            try device.lockForConfiguration()
-            if device.isExposureModeSupported(.continuousAutoExposure) {
-                device.exposureMode = .continuousAutoExposure
-                device.setExposureTargetBias(clamped) { _ in }
-            }
-            device.unlockForConfiguration()
-            exposureBias = clamped
-        } catch {
-            errorMessage = "曝光调整失败。"
-        }
-    }
-
-        func flipCamera() {
+    func flipCamera() {
         guard let old = currentInput else { return }
         let position: AVCaptureDevice.Position = old.device.position == .back ? .front : .back
         guard
@@ -1357,41 +1131,6 @@ final class CameraEngine: NSObject, ObservableObject {
         watermarkConfig: CustomWatermarkConfig = CustomWatermarkConfig()
     ) {
         guard ready, !isCapturing, !isProcessing else { return }
-
-        if timerSeconds > 0 {
-            isCapturing = true
-            let delay = UInt64(timerSeconds) * 1_000_000_000
-            Task { @MainActor in
-                try? await Task.sleep(nanoseconds: delay)
-                if self.isCapturing {
-                    self.captureNow(
-                        preset: preset,
-                        mode: mode,
-                        watermark: watermark,
-                        metadata: metadata,
-                        watermarkConfig: watermarkConfig
-                    )
-                }
-            }
-        } else {
-            captureNow(
-                preset: preset,
-                mode: mode,
-                watermark: watermark,
-                metadata: metadata,
-                watermarkConfig: watermarkConfig
-            )
-        }
-    }
-
-    private func captureNow(
-        preset: CameraPreset,
-        mode: CaptureMode,
-        watermark: Bool,
-        metadata: MetadataDraft,
-        watermarkConfig: CustomWatermarkConfig
-    ) {
-        guard ready, !isProcessing else { return }
         isCapturing = true
 
         let settings: AVCapturePhotoSettings
@@ -1429,10 +1168,6 @@ final class CameraEngine: NSObject, ObservableObject {
         }
 
         settings.photoQualityPrioritization = .quality
-
-        if settings.flashMode != .off {
-            settings.flashMode = isFlashEnabled ? .on : .off
-        }
 
         let delegate = CaptureProcessorDelegate(
             owner: self,
@@ -1826,20 +1561,10 @@ final class LivePreviewView: MTKView, AVCaptureVideoDataOutputSampleBufferDelega
 
         guard let buffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
 
+        // 方向由相机连接统一处理，避免取景层二次旋转。
         var source = CIImage(cvPixelBuffer: buffer)
-
-        switch UIDevice.current.orientation {
-        case .portrait:
-            source = source.oriented(.right)
-        case .portraitUpsideDown:
-            source = source.oriented(.left)
-        case .landscapeLeft:
-            source = source.oriented(.down)
-        case .landscapeRight:
-            source = source.oriented(.up)
-        default:
-            // iPhone 竖屏启动时优先保持竖屏。
-            source = source.oriented(.right)
+        if abs(rotationAngle) > 0.5 {
+            source = source.transformed(by: CGAffineTransform(rotationAngle: rotationAngle * .pi / 180.0))
         }
 
         let maxDimension = max(source.extent.width, source.extent.height)
@@ -1914,63 +1639,21 @@ struct LiveCameraPreview: UIViewRepresentable {
 
 enum PhotoProcessor {
     static func applyPreviewLook(_ input: CIImage, preset: CameraPreset) -> CIImage {
-        // 取景预览使用与成片相同的 AGC 参数路径，但避免高开销的原片开发算法。
-        var current = input
-
         let exposure = CIFilter.exposureAdjust()
-        exposure.inputImage = current
+        exposure.inputImage = input
         exposure.ev = preset.exposure
-        current = exposure.outputImage ?? current
 
         let controls = CIFilter.colorControls()
-        controls.inputImage = current
+        controls.inputImage = exposure.outputImage ?? input
         controls.saturation = preset.saturation
         controls.contrast = preset.contrast
         controls.brightness = 0
-        current = controls.outputImage ?? current
 
-        if let agc = preset.agcProfile {
-            let matrix = CIFilter.colorMatrix()
-            matrix.inputImage = current
-            matrix.rVector = CIVector(x: CGFloat(agc.red), y: 0, z: 0, w: 0)
-            matrix.gVector = CIVector(x: 0, y: CGFloat(agc.green), z: 0, w: 0)
-            matrix.bVector = CIVector(x: 0, y: 0, z: CGFloat(agc.blue), w: 0)
-            matrix.aVector = CIVector(x: 0, y: 0, z: 0, w: 1)
-            current = matrix.outputImage ?? current
-
-            if let tone = agc.tonePreset {
-                current = applyTonePreset(current, preset: tone, amount: agc.tone)
-            }
-
-            let gamma = agc.gamma
-            if gamma > 0 {
-                let ga = CIFilter.gammaAdjust()
-                ga.inputImage = current
-                ga.power = max(0.70, min(1.30, 1.0 + (gamma - 8.0) * 0.018))
-                current = ga.outputImage ?? current
-            }
-        }
-
-        let hs = CIFilter.highlightShadowAdjust()
-        hs.inputImage = current
-        hs.highlightAmount = preset.highlights
-        hs.shadowAmount = preset.shadows
-        current = hs.outputImage ?? current
-
-        let temperature = CIFilter.temperatureAndTint()
-        temperature.inputImage = current
-        temperature.neutral = CIVector(x: 6500, y: 0)
-        temperature.targetNeutral = CIVector(
-            x: CGFloat(6500 + preset.warmth * 90),
-            y: CGFloat(preset.tint * 8)
-        )
-        current = temperature.outputImage ?? current
-
+        var output = controls.outputImage ?? input
         if let lut = LUTStore.shared.current {
-            current = applyLUT(current, lut: lut)
+            output = applyLUT(output, lut: lut)
         }
-
-        return current
+        return output
     }
 
     static func applyLook(_ input: CIImage, preset: CameraPreset) -> CIImage {
@@ -2005,15 +1688,11 @@ enum PhotoProcessor {
                 current = lifted.outputImage ?? current
             }
 
-            if let tone = agc.tonePreset {
-                current = applyTonePreset(current, preset: tone, amount: agc.tone)
+            if !agc.toneCurve.isEmpty {
+                current = applyOneDimensionalCurve(current, points: agc.toneCurve)
             }
-
-            if agc.gamma > 0 {
-                let ga = CIFilter.gammaAdjust()
-                ga.inputImage = current
-                ga.power = max(0.70, min(1.30, 1.0 + (agc.gamma - 8.0) * 0.018))
-                current = ga.outputImage ?? current
+            if !agc.gammaCurve.isEmpty {
+                current = applyOneDimensionalCurve(current, points: agc.gammaCurve)
             }
         }
 
@@ -2050,69 +1729,33 @@ enum PhotoProcessor {
     }
 
     private static func applyOneDimensionalCurve(_ image: CIImage, points: [Float]) -> CIImage {
-        guard points.count >= 5 else { return image }
-        guard let filter = CIFilter(name: "CIToneCurve") else { return image }
+        guard points.count >= 2 else { return image }
+        let dimension = 32
+        var cube = [Float]()
+        cube.reserveCapacity(dimension * dimension * dimension * 4)
 
-        let indexes = [
-            0,
-            max(1, (points.count - 1) / 4),
-            max(2, (points.count - 1) / 2),
-            max(3, ((points.count - 1) * 3) / 4),
-            points.count - 1
-        ]
-        let p0 = max(0, min(1, points[indexes[0]]))
-        let p1 = max(0, min(1, points[indexes[1]]))
-        let p2 = max(0, min(1, points[indexes[2]]))
-        let p3 = max(0, min(1, points[indexes[3]]))
-        let p4 = max(0, min(1, points[indexes[4]]))
-
-        filter.setValue(image, forKey: kCIInputImageKey)
-        filter.setValue(CIVector(x: 0, y: CGFloat(p0)), forKey: "inputPoint0")
-        filter.setValue(CIVector(x: 0.25, y: CGFloat(p1)), forKey: "inputPoint1")
-        filter.setValue(CIVector(x: 0.50, y: CGFloat(p2)), forKey: "inputPoint2")
-        filter.setValue(CIVector(x: 0.75, y: CGFloat(p3)), forKey: "inputPoint3")
-        filter.setValue(CIVector(x: 1.0, y: CGFloat(p4)), forKey: "inputPoint4")
-        return filter.outputImage ?? image
-    }
-
-    private static func applyTonePreset(_ image: CIImage, preset: Int, amount: Float) -> CIImage {
-        guard let filter = CIFilter(name: "CIToneCurve") else { return image }
-        let strength = CGFloat(min(1.5, max(0.2, abs(amount) / 32.0)))
-
-        let pts: [(CGFloat, CGFloat)]
-        switch preset {
-        case 19:
-            pts = [
-                (0.0, 0.025 * strength + 0.01),
-                (0.25, 0.20),
-                (0.50, 0.50),
-                (0.75, 0.79),
-                (1.0, 0.985)
-            ]
-        case 2:
-            pts = [
-                (0.0, 0.015),
-                (0.25, 0.22),
-                (0.50, 0.50),
-                (0.75, 0.77),
-                (1.0, 0.99)
-            ]
-        default:
-            pts = [
-                (0.0, 0.01),
-                (0.25, 0.235),
-                (0.50, 0.50),
-                (0.75, 0.77),
-                (1.0, 0.985)
-            ]
+        for z in 0..<dimension {
+            let b = Float(z) / Float(dimension - 1)
+            for y in 0..<dimension {
+                let g = Float(y) / Float(dimension - 1)
+                for x in 0..<dimension {
+                    let r = Float(x) / Float(dimension - 1)
+                    let rr = sampleCurve(points, r)
+                    let gg = sampleCurve(points, g)
+                    let bb = sampleCurve(points, b)
+                    cube.append(rr)
+                    cube.append(gg)
+                    cube.append(bb)
+                    cube.append(1)
+                }
+            }
         }
 
+        let data = cube.withUnsafeBufferPointer { Data(buffer: $0) }
+        guard let filter = CIFilter(name: "CIColorCube") else { return image }
         filter.setValue(image, forKey: kCIInputImageKey)
-        filter.setValue(CIVector(x: pts[0].0, y: pts[0].1), forKey: "inputPoint0")
-        filter.setValue(CIVector(x: pts[1].0, y: pts[1].1), forKey: "inputPoint1")
-        filter.setValue(CIVector(x: pts[2].0, y: pts[2].1), forKey: "inputPoint2")
-        filter.setValue(CIVector(x: pts[3].0, y: pts[3].1), forKey: "inputPoint3")
-        filter.setValue(CIVector(x: pts[4].0, y: pts[4].1), forKey: "inputPoint4")
+        filter.setValue(dimension, forKey: "inputCubeDimension")
+        filter.setValue(data, forKey: "inputCubeData")
         return filter.outputImage ?? image
     }
 
@@ -2295,33 +1938,9 @@ enum WatermarkRenderer {
 
             switch selectedLayout {
             case .verticalLeft:
-                drawCustomVertical(
-                    ctx: ctx.cgContext,
-                    size: size,
-                    brand: preset.displayBrand,
-                    title: titleText,
-                    subtitle: footerText,
-                    x: 18,
-                    fromLeft: true,
-                    titleFont: titleFont,
-                    infoFont: infoFont,
-                    accent: accent,
-                    opacity: opacity
-                )
+                drawCustomVertical(ctx: ctx.cgContext, size: size, title: titleText, subtitle: footerText, x: 18, fromLeft: true, titleFont: titleFont, infoFont: infoFont, accent: accent, opacity: opacity)
             case .verticalRight:
-                drawCustomVertical(
-                    ctx: ctx.cgContext,
-                    size: size,
-                    brand: preset.displayBrand,
-                    title: titleText,
-                    subtitle: footerText,
-                    x: size.width - 18,
-                    fromLeft: false,
-                    titleFont: titleFont,
-                    infoFont: infoFont,
-                    accent: accent,
-                    opacity: opacity
-                )
+                drawCustomVertical(ctx: ctx.cgContext, size: size, title: titleText, subtitle: footerText, x: size.width - 18, fromLeft: false, titleFont: titleFont, infoFont: infoFont, accent: accent, opacity: opacity)
             case .bottom:
                 drawCustomBottom(ctx: ctx.cgContext, size: size, title: titleText, subtitle: footerText, titleFont: titleFont, infoFont: infoFont, accent: accent, opacity: opacity, band: true)
             case .minimal:
@@ -2380,7 +1999,6 @@ enum WatermarkRenderer {
     private static func drawCustomVertical(
         ctx: CGContext,
         size: CGSize,
-        brand: String,
         title: String,
         subtitle: String,
         x: CGFloat,
@@ -2402,89 +2020,16 @@ enum WatermarkRenderer {
             ctx.rotate(by: .pi / 2)
         }
 
-        UIColor.black.withAlphaComponent(min(0.92, opacity * 0.84)).setFill()
-        ctx.fill(CGRect(x: -14, y: 0, width: width + 36, height: 112))
+        UIColor.black.withAlphaComponent(opacity * 0.72).setFill()
+        ctx.fill(CGRect(x: -14, y: 0, width: width + 24, height: 88))
 
         accent.setFill()
-        ctx.fill(CGRect(x: -8, y: 0, width: 4, height: width))
+        ctx.fill(CGRect(x: -8, y: 0, width: 5, height: width))
 
-        drawBrandMark(
-            ctx: ctx,
-            brand: brand,
-            accent: accent,
-            rect: CGRect(x: 12, y: 12, width: 44, height: 44)
-        )
-
-        let titleX: CGFloat = 68
-        (title as NSString).draw(
-            at: CGPoint(x: titleX, y: 10),
-            withAttributes: [
-                .font: titleFont,
-                .foregroundColor: UIColor.white
-            ]
-        )
-
-        let rule = UIBezierPath()
-        rule.move(to: CGPoint(x: titleX, y: 10 + titleFont.lineHeight + 4))
-        rule.addLine(to: CGPoint(x: width - 12, y: 10 + titleFont.lineHeight + 4))
-        UIColor.white.withAlphaComponent(0.26).setStroke()
-        rule.lineWidth = 1
-        rule.stroke()
-
-        (subtitle as NSString).draw(
-            at: CGPoint(x: titleX, y: 18 + titleFont.lineHeight),
-            withAttributes: [
-                .font: infoFont,
-                .foregroundColor: UIColor.white.withAlphaComponent(0.82)
-            ]
-        )
+        (title as NSString).draw(at: CGPoint(x: 10, y: 4), withAttributes: [.font: titleFont, .foregroundColor: UIColor.white])
+        (subtitle as NSString).draw(at: CGPoint(x: 10, y: 8 + titleFont.lineHeight), withAttributes: [.font: infoFont, .foregroundColor: UIColor.white.withAlphaComponent(0.86)])
 
         ctx.restoreGState()
-    }
-
-    private static func drawBrandMark(
-        ctx: CGContext,
-        brand: String,
-        accent: UIColor,
-        rect: CGRect
-    ) {
-        accent.setFill()
-        ctx.fillEllipse(in: rect)
-
-        let short: String
-        switch brand {
-        case "徕卡": short = "L"
-        case "哈苏": short = "H"
-        case "蔡司": short = "Z"
-        case "维沃": short = "V"
-        case "小米": short = "M"
-        case "华为": short = "H"
-        case "欧珀": short = "O"
-        case "谷歌": short = "G"
-        case "苹果": short = ""
-        case "富士": short = "F"
-        default: short = String(brand.prefix(1))
-        }
-
-        let font = UIFont.systemFont(ofSize: rect.height * 0.44, weight: .heavy)
-        let attrs: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .foregroundColor: UIColor.white
-        ]
-        let text = short as NSString
-        let box = text.boundingRect(
-            with: rect.size,
-            options: [.usesLineFragmentOrigin, .usesFontLeading],
-            attributes: attrs,
-            context: nil
-        )
-        text.draw(
-            at: CGPoint(
-                x: rect.midX - box.width / 2,
-                y: rect.midY - box.height / 2 - 1
-            ),
-            withAttributes: attrs
-        )
     }
 
     private static func drawVertical(
@@ -2656,44 +2201,11 @@ enum PhotoSaver {
 
 // MARK: - UI
 
-struct GridOverlay: View {
-    var body: some View {
-        GeometryReader { proxy in
-            Path { path in
-                let w = proxy.size.width
-                let h = proxy.size.height
-                path.move(to: CGPoint(x: w / 3, y: 0))
-                path.addLine(to: CGPoint(x: w / 3, y: h))
-                path.move(to: CGPoint(x: w * 2 / 3, y: 0))
-                path.addLine(to: CGPoint(x: w * 2 / 3, y: h))
-                path.move(to: CGPoint(x: 0, y: h / 3))
-                path.addLine(to: CGPoint(x: w, y: h / 3))
-                path.move(to: CGPoint(x: 0, y: h * 2 / 3))
-                path.addLine(to: CGPoint(x: w, y: h * 2 / 3))
-            }
-            .stroke(.white.opacity(0.22), lineWidth: 0.8)
-        }
-    }
-}
-
-struct FocusIndicator: View {
-    var body: some View {
-        RoundedRectangle(cornerRadius: 3)
-            .stroke(.yellow.opacity(0.95), lineWidth: 1.5)
-            .frame(width: 72, height: 72)
-            .overlay(
-                Image(systemName: "sun.max")
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(.yellow)
-            )
-    }
-}
-
 struct ContentView: View {
     @EnvironmentObject private var camera: CameraEngine
     @StateObject private var agcStore = AGCStore()
 
-    @State private var preset = AGCProfileLibrary.shadowChasing[0]
+    @State private var preset = PresetLibrary.all[0]
     @State private var mode: CaptureMode = .photo
     @State private var watermark = true
     @State private var metadata = MetadataDraft()
@@ -2701,15 +2213,13 @@ struct ContentView: View {
     @State private var showSettings = false
     @State private var showAGCImporter = false
     @State private var selectedPhoto: PhotosPickerItem?
+    @State private var profile: GCamProfile = .natural
     @State private var watermarkConfig = CustomWatermarkConfig()
-    @State private var focusPoint: CGPoint?
-    @State private var pinchStartZoom: CGFloat = 1.0
-    @State private var showAdvancedControls = false
     @State private var showLUTImporter = false
     @State private var showLogoImporter = false
     @State private var activeLUTName = ""
 
-    private var effectivePreset: CameraPreset { preset }
+    private var effectivePreset: CameraPreset { profile.applying(to: preset) }
 
     var allPresets: [CameraPreset] {
         agcStore.imported + PresetLibrary.all
@@ -2719,49 +2229,13 @@ struct ContentView: View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            GeometryReader { proxy in
-                ZStack {
-                    LiveCameraPreview(
-                        session: camera.session,
-                        output: camera.videoOutput,
-                        preset: effectivePreset,
-                        isFrozen: camera.isProcessing,
-                        rotationAngle: camera.previewRotationAngle
-                    )
-                    .contentShape(Rectangle())
-                    .simultaneousGesture(
-                        SpatialTapGesture()
-                            .onEnded { value in
-                                camera.focusAndExpose(at: value.location, in: proxy.size)
-                                focusPoint = value.location
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
-                                    focusPoint = nil
-                                }
-                            }
-                    )
-                    .simultaneousGesture(
-                        MagnificationGesture()
-                            .onChanged { value in
-                                let next = pinchStartZoom * value
-                                camera.setZoom(next)
-                            }
-                            .onEnded { _ in
-                                pinchStartZoom = camera.zoomFactor
-                            }
-                    )
-
-                    if camera.isGridEnabled {
-                        GridOverlay()
-                            .allowsHitTesting(false)
-                    }
-
-                    if let focusPoint {
-                        FocusIndicator()
-                            .position(focusPoint)
-                            .allowsHitTesting(false)
-                    }
-                }
-            }
+            LiveCameraPreview(
+                session: camera.session,
+                output: camera.videoOutput,
+                preset: effectivePreset,
+                isFrozen: camera.isProcessing,
+                rotationAngle: camera.previewRotationAngle
+            )
             .ignoresSafeArea()
 
             LinearGradient(
@@ -2793,11 +2267,8 @@ struct ContentView: View {
                 previewOverlay(image)
             }
         }
-.sheet(isPresented: $showPresetPicker) {
+        .sheet(isPresented: $showPresetPicker) {
             presetPicker
-        }
-        .sheet(isPresented: $showAdvancedControls) {
-            settingsSheet
         }
         .sheet(isPresented: $showSettings) {
             settingsSheet
@@ -2854,7 +2325,8 @@ struct ContentView: View {
                         agcStore.sourceName = result.1.joined(separator: "、")
                         agcStore.enabled = true
                         preset = result.0[0]
-                                camera.errorMessage = "已加载 \(result.0.count) 个安卓配置档案。"
+                        profile = .natural
+                        camera.errorMessage = "已加载 \(result.0.count) 个安卓配置档案。"
                     case .failure(let error):
                         camera.errorMessage = "安卓配置导入失败：\(error.localizedDescription)"
                     }
@@ -2960,30 +2432,6 @@ struct ContentView: View {
             }
 
             Button {
-                camera.isFlashEnabled.toggle()
-            } label: {
-                Image(systemName: camera.isFlashEnabled ? "bolt.fill" : "bolt.slash")
-                    .frame(width: 38, height: 38)
-                    .background(.ultraThinMaterial, in: Circle())
-            }
-
-            Button {
-                camera.isGridEnabled.toggle()
-            } label: {
-                Image(systemName: camera.isGridEnabled ? "grid" : "grid.circle")
-                    .frame(width: 38, height: 38)
-                    .background(.ultraThinMaterial, in: Circle())
-            }
-
-            Button {
-                camera.flipCamera()
-            } label: {
-                Image(systemName: "camera.rotate")
-                    .frame(width: 38, height: 38)
-                    .background(.ultraThinMaterial, in: Circle())
-            }
-
-            Button {
                 showSettings = true
             } label: {
                 HStack(spacing: 5) {
@@ -3002,66 +2450,9 @@ struct ContentView: View {
     }
 
     private var bottomBar: some View {
-        VStack(spacing: 8) {
-            HStack(spacing: 7) {
-                ForEach([0.5, 1.0, 2.0, 3.0, 5.0], id: \.self) { zoom in
-                    Button {
-                        camera.setZoom(CGFloat(zoom))
-                    } label: {
-                        Text(zoom == 1.0 ? "1×" : String(format: "%.1f×", zoom))
-                            .font(.system(size: 11, weight: .bold, design: .rounded))
-                            .frame(minWidth: 44, minHeight: 34)
-                            .background(
-                                abs(camera.zoomFactor - CGFloat(zoom)) < 0.08
-                                ? Color.white.opacity(0.92)
-                                : Color.black.opacity(0.34),
-                                in: Capsule()
-                            )
-                            .foregroundStyle(abs(camera.zoomFactor - CGFloat(zoom)) < 0.08 ? Color.black : Color.white)
-                    }
-                }
-
-                Spacer(minLength: 6)
-
-                Button {
-                    showAdvancedControls = true
-                } label: {
-                    Image(systemName: "slider.horizontal.3")
-                        .font(.system(size: 16, weight: .bold))
-                        .frame(width: 38, height: 34)
-                        .background(.ultraThinMaterial, in: Capsule())
-                }
-            }
-            .padding(.horizontal, 16)
-
-            if !agcStore.imported.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 7) {
-                        ForEach(agcStore.imported.prefix(18)) { item in
-                            Button {
-                                preset = item
-                                watermarkConfig = CustomWatermarkConfig()
-                            } label: {
-                                Text(item.model)
-                                    .font(.system(size: 10, weight: .bold))
-                                    .lineLimit(1)
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 7)
-                                    .background(
-                                        preset.id == item.id ? Color.white.opacity(0.95) : Color.black.opacity(0.30),
-                                        in: Capsule()
-                                    )
-                                    .foregroundStyle(preset.id == item.id ? Color.black : Color.white)
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 12)
-                }
-            }
-
+        VStack(spacing: 10) {
             HStack(spacing: 8) {
                 ForEach(CaptureMode.allCases) { item in
-
                     Button {
                         if item == .proRAW && !camera.proRAWSupported { return }
                         if item == .livePhoto && !camera.livePhotoSupported { return }
@@ -3080,24 +2471,434 @@ struct ContentView: View {
                 }
             }
 
-            HStack(spacing: 8) {
-                Text("当前风格：")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.65))
-                Text(preset.model)
-                    .font(.system(size: 10, weight: .bold))
-                    .lineLimit(1)
-                    .foregroundStyle(.white)
-                Spacer()
-                Button("全部风格") {
-                    showPresetPicker = true
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 7) {
+                    ForEach(GCamProfile.allCases) { item in
+                        Button {
+                            profile = item
+                        } label: {
+                            Text(item.title)
+                                .font(.system(size: 10, weight: .bold))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 7)
+                                .background(profile == item ? Color.white.opacity(0.94) : Color.black.opacity(0.30), in: Capsule())
+                                .foregroundStyle(profile == item ? Color.black : Color.white)
+                        }
+                    }
                 }
-                .font(.system(size: 10, weight: .bold))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .background(.ultraThinMaterial, in: Capsule())
+                .padding(.horizontal, 12)
             }
-            .padding(.horizontal, 14)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(PresetLibrary.brands, id: \.self) { brand in
+                        Button {
+                            if let item = PresetLibrary.all.first(where: { $0.brand == brand }) {
+                                preset = item
+                            }
+                        } label: {
+                            Text(itemBrandName(brand))
+                                .font(.system(size: 11, weight: .bold))
+                                .padding(.horizontal, 11)
+                                .padding(.vertical, 8)
+                                .background(
+                                    preset.brand == brand ? Color.white : Color.black.opacity(0.32),
+                                    in: Capsule()
+                                )
+                                .foregroundStyle(preset.brand == brand ? Color.black : Color.white)
+                        }
+                    }
+
+                    if !agcStore.imported.isEmpty {
+                        Button {
+                            if let item = agcStore.imported.first { preset = item }
+                        } label: {
+                            Text("已加载安卓配置")
+                                .font(.system(size: 11, weight: .bold))
+                                .padding(.horizontal, 11)
+                                .padding(.vertical, 8)
+                                .background(.ultraThinMaterial, in: Capsule())
+                        }
+                    }
+                }
+                .padding(.horizontal, 12)
+            }
 
             HStack {
-                PhotosPicker
+                PhotosPicker(selection: $selectedPhoto, matching: .images) {
+                    Image(systemName: "photo.on.rectangle")
+                        .font(.system(size: 19, weight: .semibold))
+                        .frame(width: 50, height: 50)
+                        .background(.ultraThinMaterial, in: Circle())
+                }
+
+                Spacer()
+
+                Button {
+                    UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+                    camera.capture(
+                        preset: effectivePreset,
+                        mode: mode,
+                        watermark: watermark,
+                        metadata: metadata,
+                        watermarkConfig: watermarkConfig
+                    )
+                } label: {
+                    ZStack {
+                        Circle().fill(.white.opacity(0.22)).frame(width: 84, height: 84)
+                        Circle().fill(.white).frame(width: 68, height: 68)
+                    }
+                }
+                .disabled(!camera.ready || camera.isCapturing || camera.isProcessing)
+
+                Spacer()
+
+                Button {
+                    watermark.toggle()
+                } label: {
+                    Image(systemName: watermark ? "text.viewfinder" : "text.viewfinder.badge.magnifyingglass")
+                        .font(.system(size: 18, weight: .semibold))
+                        .frame(width: 50, height: 50)
+                        .background(.ultraThinMaterial, in: Circle())
+                }
+            }
+            .padding(.horizontal, 18)
+
+            HStack {
+                Text(mode == .photo ? "实时风格 · 自动水印" : mode == .proRAW ? "保留专业原片 · 生成风格照片" : "保留原始实况 · 生成风格照片")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.78))
+                Spacer()
+                Text("\(effectivePreset.focal) · \(effectivePreset.aperture)")
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.70))
+            }
+            .padding(.horizontal, 18)
+            .padding(.bottom, 12)
+        }
+        .padding(.top, 7)
+        .background(.black.opacity(0.24))
+    }
+
+    private func itemBrandName(_ brand: String) -> String {
+        switch brand.uppercased() {
+        case "LEICA": return "徕卡"
+        case "HASSELBLAD": return "哈苏"
+        case "ZEISS": return "蔡司"
+        case "VIVO": return "维沃"
+        case "XIAOMI": return "小米"
+        case "HUAWEI": return "华为"
+        case "GOOGLE": return "谷歌"
+        case "APPLE": return "苹果"
+        case "SONY": return "索尼"
+        case "CANON": return "佳能"
+        case "NIKON": return "尼康"
+        case "FUJIFILM": return "富士"
+        case "RICOH": return "理光"
+        case "PANASONIC": return "松下"
+        case "SIGMA": return "适马"
+        default: return brand
+        }
+    }
+
+    private func previewOverlay(_ image: UIImage) -> some View {
+        ZStack {
+            Color.black.opacity(0.88).ignoresSafeArea()
+
+            VStack(spacing: 14) {
+                HStack {
+                    Text("已生成")
+                        .font(.headline)
+                    Spacer()
+                    Button("关闭") { camera.clearPreview() }
+                }
+                .padding(.horizontal)
+
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .clipShape(RoundedRectangle(cornerRadius: 24))
+                    .padding(.horizontal, 10)
+
+                HStack(spacing: 10) {
+                    Button("继续拍摄") { camera.clearPreview() }
+                        .buttonStyle(.borderedProminent)
+
+                    if let url = camera.lastSavedURL {
+                        ShareLink(item: url) {
+                            Label("分享", systemImage: "square.and.arrow.up")
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+            }
+            .padding(.top, 12)
+        }
+    }
+
+    private var presetPicker: some View {
+        NavigationStack {
+            List {
+                Section("已加载的安卓配置") {
+                    if !agcStore.imported.isEmpty {
+                        Text("已加载 (agcStore.imported.count) 个配置档案")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if agcStore.imported.isEmpty {
+                        Text("还没有导入配置文件。")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(agcStore.imported) { item in
+                            Button {
+                                preset = item
+                                showPresetPicker = false
+                            } label: {
+                                presetRow(item)
+                            }
+                        }
+                    }
+
+                    Button {
+                        showPresetPicker = false
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                            showAGCImporter = true
+                        }
+                    } label: {
+                        Label("＋ 添加安卓配置文件", systemImage: "folder.badge.plus")
+                    }
+                    if !agcStore.imported.isEmpty {
+                        Button("清空已加载配置", role: .destructive) {
+                            agcStore.imported.removeAll()
+                            agcStore.sourceName = ""
+                            agcStore.enabled = false
+                            preset = PresetLibrary.all[0]
+                            profile = .natural
+                        }
+                    }
+                }
+
+                Section("内置 128 个风格") {
+                    ForEach(PresetLibrary.all) { item in
+                        Button {
+                            preset = item
+                            showPresetPicker = false
+                        } label: {
+                            presetRow(item)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("相机 / 风格 / 配置")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("完成") { showPresetPicker = false }
+                }
+            }
+        }
+    }
+
+    private func presetRow(_ item: CameraPreset) -> some View {
+        HStack(spacing: 12) {
+            RoundedRectangle(cornerRadius: 5)
+                .fill(Color(item.watermarkAccent))
+                .frame(width: 6, height: 38)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("\(item.displayBrand)  \(item.model)")
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                Text("\(item.lens) · \(item.focal) · \(item.aperture)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            if item.id == preset.id {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.primary)
+            }
+        }
+    }
+
+    private var settingsSheet: some View {
+        NavigationStack {
+            Form {
+                Section("安卓配置文件") {
+                    Toggle(
+                        "启用当前安卓配置",
+                        isOn: Binding(
+                            get: { agcStore.enabled },
+                            set: { enabled in
+                                agcStore.enabled = enabled
+                                if enabled, let item = agcStore.imported.first {
+                                    preset = item
+                                } else if preset.id.hasPrefix("agc-") {
+                                    preset = PresetLibrary.all[0]
+                                }
+                            }
+                        )
+                    )
+                    .disabled(agcStore.imported.isEmpty)
+
+                    if !agcStore.sourceName.isEmpty {
+                        Text("当前配置：\(agcStore.sourceName)")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Button {
+                        showSettings = false
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                            showAGCImporter = true
+                        }
+                    } label: {
+                        Label("＋ 添加安卓配置文件", systemImage: "folder.badge.plus")
+                    }
+
+                    Text("支持直接选择 .agc 文件。每个文件里的多个配置档案都会加入列表。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("水印") {
+                    Toggle("拍照后自动加水印", isOn: $watermark)
+
+                    Text("不同品牌使用不同布局：竖排、底栏、极简、右上角、分栏等，不再全部使用同一种模板。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("自定义水印") {
+                    TextField("水印主标题", text: $watermarkConfig.title)
+                    TextField("水印副标题", text: $watermarkConfig.subtitle)
+                    TextField("水印底部文字", text: $watermarkConfig.customFooter)
+                    Toggle("显示拍摄参数", isOn: $watermarkConfig.showParameters)
+                    Toggle("使用当前机型名称", isOn: $watermarkConfig.usePresetBrand)
+
+                    Picker("水印版式", selection: $watermarkConfig.layout) {
+                        ForEach(CustomWatermarkLayout.allCases) { item in
+                            Text(item.title).tag(item)
+                        }
+                    }
+
+                    Picker("相框样式", selection: $watermarkConfig.frame) {
+                        ForEach(CustomFrameStyle.allCases) { item in
+                            Text(item.title).tag(item)
+                        }
+                    }
+
+                    Stepper(
+                        "相框宽度 \(Int(watermarkConfig.frameWidth))",
+                        value: $watermarkConfig.frameWidth,
+                        in: 2...40,
+                        step: 2
+                    )
+
+                    Slider(value: $watermarkConfig.opacity, in: 0.15...0.95) {
+                        Text("水印透明度")
+                    }
+
+                    Toggle("显示自定义标志", isOn: $watermarkConfig.showLogo)
+
+                    Button("加载自定义标志图片") {
+                        showLogoImporter = true
+                    }
+
+                    if watermarkConfig.logoData != nil {
+                        Button("移除自定义标志") {
+                            watermarkConfig.logoData = nil
+                        }
+                    }
+
+                    Stepper(
+                        "标志大小 \(Int(watermarkConfig.logoScale * 100))%",
+                        value: $watermarkConfig.logoScale,
+                        in: 0.08...0.40,
+                        step: 0.02
+                    )
+
+                    Button("恢复当前预设水印") {
+                        watermarkConfig = CustomWatermarkConfig()
+                    }
+                }
+
+                Section("色彩曲线") {
+                    if activeLUTName.isEmpty {
+                        Text("当前没有加载色彩曲线。")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("当前：\(activeLUTName)")
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Button("加载三维色彩曲线") {
+                        showLUTImporter = true
+                    }
+
+                    if !activeLUTName.isEmpty {
+                        Button("关闭当前色彩曲线") {
+                            LUTStore.shared.set(nil)
+                            activeLUTName = ""
+                        }
+                    }
+                }
+
+                Section("照片信息") {
+                    TextField("厂商", text: $metadata.make)
+                    TextField("机型", text: $metadata.model)
+                    TextField("镜头", text: $metadata.lens)
+                    TextField("摄影者", text: $metadata.artist)
+                    TextField("版权", text: $metadata.copyright)
+                    TextField("拍摄时间", text: $metadata.dateOriginal)
+                    Toggle("移除位置坐标", isOn: $metadata.stripGPS)
+
+                    Button("使用当前预设信息") {
+                        metadata.make = effectivePreset.exifMake
+                        metadata.model = effectivePreset.exifModel
+                        metadata.lens = effectivePreset.lens
+                    }
+
+                    Button("把机型写入水印标题") {
+                        watermarkConfig.title = metadata.model.isEmpty ? effectivePreset.exifModel : metadata.model
+                        watermarkConfig.usePresetBrand = false
+                    }
+                }
+
+                Section("说明") {
+                    Text("照片信息修改只作用于导出的照片；专业原片保持原始数据。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("设置")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("完成") { showSettings = false }
+                }
+            }
+        }
+    }
+}
+
+@MainActor
+final class AGCStore: ObservableObject {
+    @Published var imported: [CameraPreset] = []
+    @Published var enabled = false
+    @Published var sourceName = ""
+}
+
+@main
+struct GCamStyleApp: App {
+    @StateObject private var camera = CameraEngine()
+
+    var body: some Scene {
+        WindowGroup {
+            ContentView()
+                .environmentObject(camera)
+                .preferredColorScheme(.dark)
+        }
+    }
+}
