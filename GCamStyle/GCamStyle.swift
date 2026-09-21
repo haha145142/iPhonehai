@@ -939,7 +939,7 @@ enum ExportService {
         let styled = PhotoProcessor.applyLook(input, preset: preset)
         let context = CIContext()
         guard let styledCG = context.createCGImage(styled, from: styled.extent) else {
-            throw NSError(domain: "GCamStyle", code: 2, userInfo: [
+            throw NSError(domain: "提示", code: 2, userInfo: [
                 NSLocalizedDescriptionKey: "风格渲染失败"
             ])
         }
@@ -995,12 +995,12 @@ enum ExportService {
             1,
             nil
         ) else {
-            throw NSError(domain: "GCamStyle", code: 3, userInfo: [NSLocalizedDescriptionKey: "无法创建 JPEG"])
+            throw NSError(domain: "提示", code: 3, userInfo: [NSLocalizedDescriptionKey: "无法创建 JPEG"])
         }
 
         CGImageDestinationAddImage(destination, finalImage, properties as CFDictionary)
         guard CGImageDestinationFinalize(destination) else {
-            throw NSError(domain: "GCamStyle", code: 4, userInfo: [NSLocalizedDescriptionKey: "JPEG 导出失败"])
+            throw NSError(domain: "提示", code: 4, userInfo: [NSLocalizedDescriptionKey: "JPEG 导出失败"])
         }
 
         return url
@@ -1053,7 +1053,7 @@ enum WatermarkRenderer {
     }
 
     private static func info(_ preset: CameraPreset) -> String {
-        "(preset.focal)  ·  (preset.aperture)  ·  (preset.shutter)  ·  (preset.iso)"
+        "\(preset.focal)  ·  \(preset.aperture)  ·  (preset.shutter)  ·  (preset.iso)"
     }
 
     private static func fonts(_ size: CGSize) -> (UIFont, UIFont) {
@@ -1074,7 +1074,7 @@ enum WatermarkRenderer {
         context.cgContext.translateBy(x: band.width * 0.50, y: size.height - 34)
         context.cgContext.rotate(by: -.pi / 2)
         let (hf, sf) = fonts(size)
-        ("(p.exifMake)  (p.exifModel)" as NSString).draw(
+        ("\(p.exifMake)  \(p.exifModel)" as NSString).draw(
             at: CGPoint(x: 0, y: -hf.lineHeight),
             withAttributes: [.font: hf, .foregroundColor: UIColor.white]
         )
@@ -1099,9 +1099,9 @@ enum WatermarkRenderer {
         context.fill(CGRect(x: 0, y: band.minY, width: 150, height: 7))
         let (hf, sf) = fonts(size)
         let x = 42.0
-        ("(p.exifMake)  (p.exifModel)" as NSString).draw(at: CGPoint(x:x, y:band.minY+23),
+        ("\(p.exifMake)  \(p.exifModel)" as NSString).draw(at: CGPoint(x:x, y:band.minY+23),
             withAttributes:[.font:hf,.foregroundColor:UIColor.white])
-        ("中画幅  ·  (p.lens)  ·  (info(p))" as NSString).draw(at: CGPoint(x:x, y:band.minY+70),
+        ("中画幅  ·  \(p.lens)  ·  (info(p))" as NSString).draw(at: CGPoint(x:x, y:band.minY+70),
             withAttributes:[.font:sf,.foregroundColor:UIColor.white.withAlphaComponent(0.84)])
         let square = CGRect(x: size.width - 72, y: band.minY + 28, width: 38, height: 38)
         accent.setFill()
@@ -1117,9 +1117,9 @@ enum WatermarkRenderer {
         UIColor(red: 0.18, green: 0.55, blue: 0.92, alpha: 1).setFill()
         context.fill(CGRect(x: rect.minX + 28, y: rect.minY + 10, width: rect.width - 56, height: 4))
         let (hf,sf)=fonts(size)
-        ("(p.exifMake)  (p.exifModel)" as NSString).draw(at: CGPoint(x:rect.minX+34,y:rect.minY+23),
+        ("\(p.exifMake)  \(p.exifModel)" as NSString).draw(at: CGPoint(x:rect.minX+34,y:rect.minY+23),
             withAttributes:[.font:hf,.foregroundColor:UIColor.white])
-        ("自然色彩  ·  (p.lens)  ·  (info(p))" as NSString).draw(at: CGPoint(x:rect.minX+36,y:rect.minY+65),
+        ("自然色彩  ·  \(p.lens)  ·  (info(p))" as NSString).draw(at: CGPoint(x:rect.minX+36,y:rect.minY+65),
             withAttributes:[.font:sf,.foregroundColor:UIColor.white.withAlphaComponent(0.84)])
     }
 
@@ -1132,9 +1132,9 @@ enum WatermarkRenderer {
         UIColor(red:0.18,green:0.55,blue:0.92,alpha:1).setFill()
         context.fill(CGRect(x:rect.minX, y:rect.minY, width:8, height:rect.height))
         let (hf,sf)=fonts(size)
-        ("vivo  ·  (p.exifModel)" as NSString).draw(at: CGPoint(x:rect.minX+28,y:rect.minY+22),
+        ("vivo  ·  \(p.exifModel)" as NSString).draw(at: CGPoint(x:rect.minX+28,y:rect.minY+22),
             withAttributes:[.font:hf,.foregroundColor:UIColor.white])
-        ("蔡司联合影像  ·  (p.lens)" as NSString).draw(at: CGPoint(x:rect.minX+30,y:rect.minY+66),
+        ("蔡司联合影像  ·  \(p.lens)" as NSString).draw(at: CGPoint(x:rect.minX+30,y:rect.minY+66),
             withAttributes:[.font:sf,.foregroundColor:UIColor.white.withAlphaComponent(0.88)])
         ("(info(p))" as NSString).draw(at: CGPoint(x:rect.minX+30,y:rect.minY+89),
             withAttributes:[.font:sf,.foregroundColor:UIColor.white.withAlphaComponent(0.72)])
@@ -1149,7 +1149,7 @@ enum WatermarkRenderer {
         UIColor(red:0.95,green:0.35,blue:0.08,alpha:1).setFill()
         context.fill(CGRect(x:rect.minX, y:rect.minY, width:12, height:rect.height))
         let (hf,sf)=fonts(size)
-        ("小米  (p.exifModel)" as NSString).draw(at: CGPoint(x:rect.minX+30,y:rect.minY+20),
+        ("小米  \(p.exifModel)" as NSString).draw(at: CGPoint(x:rect.minX+30,y:rect.minY+20),
             withAttributes:[.font:hf,.foregroundColor:UIColor.white])
         ("徕卡影像  ·  (p.style == "Portrait" ? "人像" : "自然")" as NSString).draw(at: CGPoint(x:rect.minX+32,y:rect.minY+64),
             withAttributes:[.font:sf,.foregroundColor:UIColor.white.withAlphaComponent(0.88)])
@@ -1166,9 +1166,9 @@ enum WatermarkRenderer {
         context.fill(CGRect(x:rect.minX, y:rect.minY, width:5, height:rect.height))
         let (_,sf)=fonts(size)
         let hf=UIFont.systemFont(ofSize:max(26,size.width/62),weight:.bold)
-        ("华为  (p.exifModel)" as NSString).draw(at: CGPoint(x:rect.minX+24,y:rect.minY+19),
+        ("华为  \(p.exifModel)" as NSString).draw(at: CGPoint(x:rect.minX+24,y:rect.minY+19),
             withAttributes:[.font:hf,.foregroundColor:UIColor.white])
-        ("影像风格  ·  (p.lens)" as NSString).draw(at: CGPoint(x:rect.minX+26,y:rect.minY+59),
+        ("影像风格  ·  \(p.lens)" as NSString).draw(at: CGPoint(x:rect.minX+26,y:rect.minY+59),
             withAttributes:[.font:sf,.foregroundColor:UIColor.white.withAlphaComponent(0.86)])
     }
 
@@ -1179,7 +1179,7 @@ enum WatermarkRenderer {
         UIColor(red:0.35,green:0.80,blue:0.45,alpha:1).setFill()
         context.fill(CGRect(x:0,y:size.height-h,width:size.width,height:3))
         let (_,sf)=fonts(size)
-        let text="欧珀  (p.exifModel)  ·  哈苏人像  ·  (info(p))"
+        let text="欧珀  \(p.exifModel)  ·  哈苏人像  ·  (info(p))"
         (text as NSString).draw(at: CGPoint(x:34,y:size.height-h+27),
             withAttributes:[.font:sf,.foregroundColor:UIColor.white.withAlphaComponent(0.9)])
     }
@@ -1192,7 +1192,7 @@ enum WatermarkRenderer {
         context.fill(rect)
         let (_,sf)=fonts(size)
         let hf=UIFont.systemFont(ofSize:max(23,size.width/70),weight:.bold)
-        ("谷歌  (p.exifModel)" as NSString).draw(at:CGPoint(x:rect.minX+22,y:rect.minY+15),
+        ("谷歌  \(p.exifModel)" as NSString).draw(at:CGPoint(x:rect.minX+22,y:rect.minY+15),
             withAttributes:[.font:hf,.foregroundColor:UIColor.black])
         ("计算摄影  ·  (info(p))" as NSString).draw(at:CGPoint(x:rect.minX+24,y:rect.minY+53),
             withAttributes:[.font:sf,.foregroundColor:UIColor.black.withAlphaComponent(0.72)])
@@ -1200,7 +1200,7 @@ enum WatermarkRenderer {
 
     private static func drawApple(_ context: UIGraphicsImageRendererContext, _ size: CGSize, _ p: CameraPreset) {
         let (_,sf)=fonts(size)
-        let text="苹果  (p.exifModel)  ·  (info(p))"
+        let text="苹果  \(p.exifModel)  ·  (info(p))"
         let attrs:[NSAttributedString.Key:Any]=[.font:sf,.foregroundColor:UIColor.white]
         let measured=(text as NSString).size(withAttributes:attrs)
         let rect=CGRect(x:(size.width-measured.width)/2-22,y:size.height-64,width:measured.width+44,height:38)
@@ -1218,8 +1218,8 @@ enum WatermarkRenderer {
         context.cgContext.translateBy(x:band.width*0.5,y:size.height-28)
         context.cgContext.rotate(by:-.pi/2)
         let hf=UIFont.systemFont(ofSize:max(24,size.width/66),weight:.bold)
-        ("索尼  (p.exifModel)" as NSString).draw(at:CGPoint(x:0,y:-hf.lineHeight),withAttributes:[.font:hf,.foregroundColor:UIColor.white])
-        ("(p.lens)  ·  (info(p))" as NSString).draw(at:CGPoint(x:0,y:10),withAttributes:[.font:sf,.foregroundColor:UIColor.white.withAlphaComponent(0.8)])
+        ("索尼  \(p.exifModel)" as NSString).draw(at:CGPoint(x:0,y:-hf.lineHeight),withAttributes:[.font:hf,.foregroundColor:UIColor.white])
+        ("\(p.lens)  ·  (info(p))" as NSString).draw(at:CGPoint(x:0,y:10),withAttributes:[.font:sf,.foregroundColor:UIColor.white.withAlphaComponent(0.8)])
         context.cgContext.restoreGState()
     }
 
@@ -1232,8 +1232,8 @@ enum WatermarkRenderer {
         context.fill(CGRect(x:rect.minX,y:rect.minY,width:10,height:rect.height))
         let (_,sf)=fonts(size)
         let hf=UIFont.systemFont(ofSize:max(22,size.width/70),weight:.bold)
-        ("佳能  (p.exifModel)" as NSString).draw(at:CGPoint(x:rect.minX+26,y:rect.minY+15),withAttributes:[.font:hf,.foregroundColor:UIColor.black])
-        ("(p.lens)  ·  (info(p))" as NSString).draw(at:CGPoint(x:rect.minX+28,y:rect.minY+55),withAttributes:[.font:sf,.foregroundColor:UIColor.black.withAlphaComponent(0.72)])
+        ("佳能  \(p.exifModel)" as NSString).draw(at:CGPoint(x:rect.minX+26,y:rect.minY+15),withAttributes:[.font:hf,.foregroundColor:UIColor.black])
+        ("\(p.lens)  ·  (info(p))" as NSString).draw(at:CGPoint(x:rect.minX+28,y:rect.minY+55),withAttributes:[.font:sf,.foregroundColor:UIColor.black.withAlphaComponent(0.72)])
     }
 
     private static func drawNikon(_ context: UIGraphicsImageRendererContext, _ size: CGSize, _ p: CameraPreset) {
@@ -1244,8 +1244,8 @@ enum WatermarkRenderer {
         context.fill(CGRect(x:rect.minX,y:rect.maxY-5,width:rect.width,height:5))
         let (_,sf)=fonts(size)
         let hf=UIFont.systemFont(ofSize:max(23,size.width/70),weight:.bold)
-        ("尼康  (p.exifModel)" as NSString).draw(at:CGPoint(x:rect.minX+18,y:rect.minY+13),withAttributes:[.font:hf,.foregroundColor:UIColor.white])
-        ("(p.lens)  ·  (info(p))" as NSString).draw(at:CGPoint(x:rect.minX+20,y:rect.minY+49),withAttributes:[.font:sf,.foregroundColor:UIColor.white.withAlphaComponent(0.8)])
+        ("尼康  \(p.exifModel)" as NSString).draw(at:CGPoint(x:rect.minX+18,y:rect.minY+13),withAttributes:[.font:hf,.foregroundColor:UIColor.white])
+        ("\(p.lens)  ·  (info(p))" as NSString).draw(at:CGPoint(x:rect.minX+20,y:rect.minY+49),withAttributes:[.font:sf,.foregroundColor:UIColor.white.withAlphaComponent(0.8)])
     }
 
     private static func drawFujifilm(_ context: UIGraphicsImageRendererContext, _ size: CGSize, _ p: CameraPreset) {
@@ -1265,7 +1265,7 @@ enum WatermarkRenderer {
             colors[i].setFill(); context.fill(CGRect(x:x,y:size.height-h,width:w,height:6)); x += w+12
         }
         let (_,sf)=fonts(size)
-        ("富士胶片  (p.exifModel)  ·  (p.lens)  ·  (info(p))" as NSString).draw(
+        ("富士胶片  \(p.exifModel)  ·  \(p.lens)  ·  (info(p))" as NSString).draw(
             at:CGPoint(x:30,y:size.height-h+30),withAttributes:[.font:sf,.foregroundColor:UIColor.white])
     }
 
@@ -1277,9 +1277,9 @@ enum WatermarkRenderer {
         context.fill(CGRect(x:box.maxX-8,y:box.minY,width:8,height:box.height))
         let (_,sf)=fonts(size)
         let hf=UIFont.systemFont(ofSize:max(24,size.width/66),weight:.bold)
-        ("理光  (p.exifModel)" as NSString).draw(at:CGPoint(x:box.minX+20,y:box.minY+18),
+        ("理光  \(p.exifModel)" as NSString).draw(at:CGPoint(x:box.minX+20,y:box.minY+18),
             withAttributes:[.font:hf,.foregroundColor:UIColor.white])
-        ("街拍  ·  (p.lens)  ·  (info(p))" as NSString).draw(at:CGPoint(x:box.minX+22,y:box.minY+60),
+        ("街拍  ·  \(p.lens)  ·  (info(p))" as NSString).draw(at:CGPoint(x:box.minX+22,y:box.minY+60),
             withAttributes:[.font:sf,.foregroundColor:UIColor.white.withAlphaComponent(0.82)])
     }
 
@@ -1288,7 +1288,7 @@ enum WatermarkRenderer {
         UIColor.black.withAlphaComponent(0.65).setFill()
         context.fill(CGRect(x:0,y:size.height-h,width:size.width,height:h))
         let (_,sf)=fonts(size)
-        ("(p.chineseBrand)  (p.chineseModel)  ·  (p.lens)  ·  (info(p))" as NSString).draw(
+        ("(p.chineseBrand)  (p.chineseModel)  ·  \(p.lens)  ·  (info(p))" as NSString).draw(
             at:CGPoint(x:28,y:size.height-h+28),withAttributes:[.font:sf,.foregroundColor:UIColor.white.withAlphaComponent(0.88)])
     }
 }
@@ -1434,7 +1434,7 @@ struct ContentView: View {
             }
         }
         .alert(
-            "GCamStyle",
+            "提示",
             isPresented: Binding(
                 get: { camera.errorMessage != nil },
                 set: { if !$0 { camera.errorMessage = nil } }
@@ -1452,7 +1452,7 @@ struct ContentView: View {
                 Text("风格相机")
                     .font(.system(size: 15, weight: .bold))
                     .tracking(1.3)
-                Text("\(preset.brand) · \(preset.model)")
+                Text("\\(preset.brand) · \\(preset.model)")
                     .font(.system(size: 10, weight: .medium, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.72))
             }
@@ -1570,7 +1570,7 @@ struct ContentView: View {
 
                 Spacer()
 
-                Text("\(preset.focal) · \(preset.aperture)")
+                Text("\\(preset.focal) · \\(preset.aperture)")
                     .font(.system(size: 10, weight: .medium, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.70))
             }
@@ -1658,7 +1658,7 @@ struct ContentView: View {
             List {
                 Section("品牌") {
                     ForEach(PresetLibrary.brands, id: \.self) { brand in
-                        Text(brand)
+                        Text(brandChineseName(brand))
                             .font(.system(size: 13, weight: .bold))
                             .listRowBackground(
                                 preset.brand == brand ? Color.white.opacity(0.08) : Color.clear
@@ -1678,10 +1678,10 @@ struct ContentView: View {
                                     .frame(width: 7, height: 34)
 
                                 VStack(alignment: .leading, spacing: 3) {
-                                    Text("\(item.brand) \(item.model)")
+                                    Text("\\(item.brand) \\(item.model)")
                                         .font(.headline)
                                         .foregroundStyle(.primary)
-                                    Text("\(item.style) · \(item.lens)")
+                                    Text("\\(item.style) · \\(item.lens)")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
@@ -1704,7 +1704,7 @@ struct ContentView: View {
     private var metadataSheet: some View {
         NavigationStack {
             Form {
-                Section("EXIF 机型") {
+                Section("照片信息") {
                     TextField("厂商", text: $metadata.make)
                     TextField("机型", text: $metadata.model)
                     TextField("镜头", text: $metadata.lens)
@@ -1715,7 +1715,7 @@ struct ContentView: View {
                 }
 
                 Section("快速写入当前预设") {
-                    Button("使用 \(preset.brand) \(preset.model)") {
+                    Button("使用 \\(preset.brand) \\(preset.model)") {
                         metadata.make = preset.exifMake
                         metadata.model = preset.exifModel
                         metadata.lens = preset.lens
