@@ -133,7 +133,7 @@ struct CameraPreset: Identifiable, Hashable {
 // 参数不是厂商内部算法，而是本 App 的可解释渲染参数。
 enum PresetLibrary {
     static let all: [CameraPreset] = {
-        let bases: [(String,String,String,String,String,String,String,String,Float,Float,Float,Float,Float,Float,Float,String,String)] = [
+        let bases: [(String,String,String,String,String,String,String,String,Double,Double,Double,Double,Double,Double,Double,String,String)] = [
             ("LEICA","Q3","SUMMILUX 1:1.7/28 ASPH.","28mm","F1.7","ISO 100","1/250s", "徕卡经典", 0.92,1.08,0.92,0.10,0.28,0,0,"Leica Camera AG","LEICA Q3"),
             ("LEICA","Q3 43","APO-SUMMICRON 1:2/43 ASPH.","43mm","F2.0","ISO 100","1/250s", "徕卡 43", 0.93,1.08,0.94,0.08,0.25,0,0,"Leica Camera AG","LEICA Q3 43"),
             ("LEICA","M11","SUMMILUX-M 1:1.4/35 ASPH.","35mm","F1.4","ISO 64","1/500s", "徕卡 M", 0.92,1.10,0.92,0.09,0.30,0,0,"Leica Camera AG","LEICA M11"),
@@ -168,7 +168,7 @@ enum PresetLibrary {
             ("SIGMA","fp L","Contemporary","45mm","F2.8","ISO 100","1/500s", "适马", 0.97,1.06,0.94,0.12,0.34,0,0,"SIGMA","SIGMA fp L")
         ]
 
-        let variants: [(String,Float,Float,Float,Float,Float)] = [
+        let variants: [(String,Double,Double,Double,Double,Double)] = [
             ("自然",1.00,1.00,0.00,0.00,0.00),
             ("电影",0.93,1.10,-0.08,0.12,0.55),
             ("人像",1.02,1.05,0.06,0.18,0.28),
@@ -191,14 +191,14 @@ enum PresetLibrary {
                         iso: b.5,
                         shutter: b.6,
                         style: v.0,
-                        exposure: b.8 + v.3,
-                        saturation: b.9 * v.1,
-                        contrast: b.10 * v.2,
-                        highlights: min(1, max(0, b.11 + v.4)),
-                        shadows: min(1, max(0, b.12)),
-                        sharpness: min(1, max(0, b.13 + v.5)),
-                        warmth: b.14,
-                        tint: b.15,
+                        exposure: Float(b.8 + v.3),
+                        saturation: Float(b.9 * v.1),
+                        contrast: Float(b.10 * v.2),
+                        highlights: Float(min(1.0, max(0.0, b.11 + v.4))),
+                        shadows: Float(min(1.0, max(0.0, b.12))),
+                        sharpness: Float(min(1.0, max(0.0, b.13 + v.5))),
+                        warmth: Float(b.14),
+                        tint: Float(b.15),
                         channelBias: 0,
                         exifMake: b.15,
                         exifModel: b.16,
