@@ -100,28 +100,54 @@ jobs:
           /usr/bin/unzip -tq GCamStyle-iOS-resignable.ipa
           ls -lh GCamStyle-iOS-resignable.ipa
 
-      - name: iOS 27 simulator build smoke test
+      - name: iOS 27 simulator startup smoke test
         run: |
           set -euxo pipefail
 
-          echo "可用 iOS 模拟器运行时："
-          /usr/bin/xcrun simctl list runtimes
+          SIM_RUNTIME_ID=$(/usr/bin/xcrun simctl list runtimes -j | /usr/bin/python3 -c '
+import json,sys
+r=json.load(sys.stdin)["runtimes"]
+x=[x["identifier"] for x in r if x["platform"]=="iOS" and x["version"].startswith("27.0") and x["isAvailable"]]
+print(x[0] if x else "")
+')
+          test -n "$SIM_RUNTIME_ID"
 
-          echo "编译模拟器版本（不依赖模拟器启动）"
+          DEVICE_TYPE_ID=$(/usr/bin/xcrun simctl list devicetypes -j | /usr/bin/python3 -c '
+import json,sys
+d=json.load(sys.stdin)["devicetypes"]
+x=[x["identifier"] for x in d if x["name"]=="iPhone 17 Pro"]
+print(x[0] if x else "")
+')
+          test -n "$DEVICE_TYPE_ID"
+
+          UDID=$(/usr/bin/xcrun simctl create GCamStyle-Smoke "$DEVICE_TYPE_ID" "$SIM_RUNTIME_ID")
+          trap '/usr/bin/xcrun simctl shutdown "$UDID" || true; /usr/bin/xcrun simctl delete "$UDID" || true' EXIT
+
+          /usr/bin/xcrun simctl boot "$UDID"
+          /usr/bin/xcrun simctl bootstatus "$UDID" -b
+
           rm -rf "$RUNNER_TEMP/GCamSimulator"
           xcodebuild \
             -project GCamStyle.xcodeproj \
             -scheme GCamStyle \
             -configuration Debug \
             -sdk iphonesimulator \
-            -destination 'generic/platform=iOS Simulator' \
+            -destination "platform=iOS Simulator,id=$UDID" \
             -derivedDataPath "$RUNNER_TEMP/GCamSimulator" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             build
 
-          test -d "$RUNNER_TEMP/GCamSimulator/Build/Products/Debug-iphonesimulator/GCamStyle.app"
-          test -f "$RUNNER_TEMP/GCamSimulator/Build/Products/Debug-iphonesimulator/GCamStyle.app/GCamStyle"
+          APP_SIM="$RUNNER_TEMP/GCamSimulator/Build/Products/Debug-iphonesimulator/GCamStyle.app"
+          test -d "$APP_SIM"
+          test -f "$APP_SIM/GCamStyle"
+          /usr/bin/xcrun simctl install "$UDID" "$APP_SIM"
+          /usr/bin/xcrun simctl launch "$UDID" com.gcamstyle.ios
+          sleep 5
+
+          LOG=$(/usr/bin/xcrun simctl spawn "$UDID" log show --last 5s --style compact --predicate 'process == "GCamStyle"' || true)
+          echo "$LOG"
+          ! echo "$LOG" | grep -Eiq 'fatal error|uncaught exception|SIGABRT|EXC_CRASH|abort\(\)'
 
       - name: Upload diagnostics
         if: always()
