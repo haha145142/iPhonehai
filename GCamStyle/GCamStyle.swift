@@ -455,18 +455,79 @@ final class CameraEngine: NSObject, ObservableObject {
     }
 
     fileprivate func handleRawPhoto(data: Data, preset: CameraPreset) {
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("GCamStyle-\(UUID().uuidString).dng")
+        let rawURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("GCamStyle-RAW-\(UUID().uuidString).dng")
+
         do {
-            try data.write(to: url, options: .atomic)
+            try data.write(to: rawURL, options: .atomic)
+
+            // Preserve the original ProRAW DNG in Photos.
             Task {
-                await PhotoSaver.saveRAW(url: url)
+                await PhotoSaver.saveRAW(url: rawURL)
+            }
+
+            // Develop the RAW with Apple's CIRAWFilter, then apply the
+            // selected look to a companion JPEG. The original DNG is untouched.
+            guard let rawFilter = CIRAWFilter(imageURL: rawURL) else { return }
+
+            rawFilter.isDraftModeEnabled = false
+            rawFilter.exposure = preset.exposure
+
+            if rawFilter.isContrastSupported {
+                rawFilter.contrastAmount = min(1.0, max(0.0, preset.contrast * 0.65))
+            }
+            if rawFilter.isDetailSupported {
+                rawFilter.detailAmount = min(3.0, max(0.0, preset.sharpness * 2.0))
+            }
+            if rawFilter.isSharpnessSupported {
+                rawFilter.sharpnessAmount = min(1.0, max(0.0, preset.sharpness))
+            }
+            if rawFilter.isLensCorrectionSupported {
+                rawFilter.isLensCorrectionEnabled = true
+            }
+            if rawFilter.isLuminanceNoiseReductionSupported {
+                rawFilter.luminanceNoiseReductionAmount = 0.5
+            }
+            if rawFilter.isColorNoiseReductionSupported {
+                rawFilter.colorNoiseReductionAmount = 0.35
+            }
+
+            guard let rawImage = rawFilter.outputImage else { return }
+            let styled = PhotoProcessor.applyLook(rawImage, preset: preset)
+            let context = CIContext()
+            guard let cg = context.createCGImage(styled, from: styled.extent) else { return }
+
+            let exportMetadata = MetadataDraft(
+                make: preset.exifMake,
+                model: preset.exifModel,
+                lens: preset.lens,
+                artist: "",
+                copyright: "",
+                software: "GCamStyle iOS ProRAW",
+                dateOriginal: "",
+                stripGPS: false
+            )
+
+            if let styledURL = try? ExportService.writeRenderedJPEG(
+                cgImage: cg,
+                preset: preset,
+                metadata: exportMetadata,
+                watermark: false,
+                sourceProperties: rawFilter.properties.mapKeysToString()
+            ),
+            let styledData = try? Data(contentsOf: styledURL),
+            let image = UIImage(data: styledData) {
+                DispatchQueue.main.async {
+                    self.lastImage = image
+                    self.lastSavedURL = styledURL
+                    self.errorMessage = "ProRAW 原文件与风格化 JPEG 均已保存。"
+                }
+                Task { await PhotoSaver.saveJPEG(url: styledURL) }
             }
         } catch {
-            errorMessage = "ProRAW 原文件保存失败：\(error.localizedDescription)"
+            errorMessage = "ProRAW 处理失败：\(error.localizedDescription)"
         }
     }
-
     fileprivate func handleLivePhoto(
         stillData: Data,
         movieURL: URL,
