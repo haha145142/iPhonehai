@@ -1940,7 +1940,7 @@ enum PhotoProcessor {
             matrix.aVector = CIVector(x: 0, y: 0, z: 0, w: 1)
             current = matrix.outputImage ?? current
 
-            if let tone = agc.toneCurvePreset {
+            if let tone = agc.tonePreset {
                 current = applyTonePreset(current, preset: tone, amount: agc.tone)
             }
 
@@ -2014,7 +2014,7 @@ enum PhotoProcessor {
             if agc.gamma > 0 {
                 let ga = CIFilter.gammaAdjust()
                 ga.inputImage = current
-                ga.power = CGFloat(max(0.70, min(1.30, 1.0 + (agc.gamma - 8.0) * 0.018)))
+                ga.power = max(0.70, min(1.30, 1.0 + (agc.gamma - 8.0) * 0.018))
                 current = ga.outputImage ?? current
             }
         }
