@@ -3,9 +3,9 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDisplayName</key>
-	<string>GCam Style</string>
+	<string>风格相机</string>
 	<key>CFBundleExecutable</key>
-	<string>GCamStyle</string>
+	<string>风格相机</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.gcamstyle.ios</string>
 	<key>CFBundleInfoDictionaryVersion</key>
@@ -26,6 +26,10 @@
 	<string>用于 Live Photo 记录现场声音。</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>用于将处理后的照片、RAW 和 Live Photo 保存到照片图库。</string>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+	</array>
 	<key>UILaunchScreen</key>
 	<dict/>
 </dict>
