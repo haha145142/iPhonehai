@@ -192,7 +192,6 @@ enum PresetLibrary {
 
 // MARK: - Camera engine
 
-@MainActor
 final class CameraEngine: NSObject, ObservableObject {
     let session = AVCaptureSession()
     let videoOutput = AVCaptureVideoDataOutput()
@@ -614,7 +613,7 @@ final class PhotoCaptureDelegate: NSObject, AVCapturePhotoCaptureDelegate {
 
     func photoOutput(
         _ output: AVCapturePhotoOutput,
-        didFinishRecordingLivePhotoMovieTo outputFileURL: URL,
+        didFinishProcessingLivePhotoToMovieFileAt outputFileURL: URL,
         duration: CMTime,
         photoDisplayTime: CMTime,
         resolvedSettings: AVCaptureResolvedPhotoSettings,
