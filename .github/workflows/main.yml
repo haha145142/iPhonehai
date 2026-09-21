@@ -7,9 +7,9 @@ on:
 
 jobs:
   build:
-    name: Build GCamStyle IPA
+    name: Build resignable GCamStyle IPA
     runs-on: macos-15
-    timeout-minutes: 20
+    timeout-minutes: 25
 
     steps:
       - name: Checkout
@@ -17,21 +17,24 @@ jobs:
 
       - name: Show Xcode
         run: |
+          set -euxo pipefail
           xcodebuild -version
           xcode-select -p
-          xcodebuild -showsdks | grep -E 'iphoneos' | tail -5 || true
+          xcodebuild -showsdks | grep -E 'iphoneos|iPhoneOS' | tail -10 || true
 
-      - name: Validate project
+      - name: Validate Xcode project
         run: |
+          set -euxo pipefail
           test -f GCamStyle.xcodeproj/project.pbxproj
           test -f GCamStyle.xcodeproj/xcshareddata/xcschemes/GCamStyle.xcscheme
           test -f GCamStyle/GCamStyle.swift
           test -f GCamStyle/Info.plist
           xcodebuild -project GCamStyle.xcodeproj -list
 
-      - name: Build for iPhone
+      - name: Build device app
         run: |
-          rm -rf "$RUNNER_TEMP/GCamDerivedData"
+          set -o pipefail
+          rm -rf "$RUNNER_TEMP/GCamDerivedData" "$RUNNER_TEMP/xcodebuild.log"
           xcodebuild \
             -project GCamStyle.xcodeproj \
             -scheme GCamStyle \
@@ -43,35 +46,49 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             DEVELOPMENT_TEAM="" \
             AD_HOC_CODE_SIGNING_ALLOWED=NO \
-            build
+            build 2>&1 | tee "$RUNNER_TEMP/xcodebuild.log"
 
-      - name: Ad-hoc sign for resigning tools
+      - name: Verify app bundle
         run: |
+          set -euxo pipefail
           APP="$RUNNER_TEMP/GCamDerivedData/Build/Products/Release-iphoneos/GCamStyle.app"
           test -d "$APP"
-          /usr/bin/codesign --force --deep --sign - "$APP"
-          /usr/bin/codesign --verify --deep --strict "$APP"
-          test -d "$APP/_CodeSignature"
-
-      - name: Verify Mach-O
-        run: |
-          APP="$RUNNER_TEMP/GCamDerivedData/Build/Products/Release-iphoneos/GCamStyle.app"
           test -f "$APP/GCamStyle"
-          file "$APP/GCamStyle"
-          /usr/bin/lipo -info "$APP/GCamStyle" || true
           /usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$APP/Info.plist"
           /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/Info.plist"
+          file "$APP/GCamStyle"
+          /usr/bin/otool -hv "$APP/GCamStyle" | head -8
 
-      - name: Package IPA
+      - name: Create temporary ad-hoc signature
         run: |
+          set -euxo pipefail
+          APP="$RUNNER_TEMP/GCamDerivedData/Build/Products/Release-iphoneos/GCamStyle.app"
+          /usr/bin/codesign --remove-signature "$APP" || true
+          /usr/bin/codesign --force --verbose --sign - "$APP"
+          /usr/bin/codesign --verify --deep --strict --verbose=2 "$APP"
+
+      - name: Package resignable IPA
+        run: |
+          set -euxo pipefail
           APP="$RUNNER_TEMP/GCamDerivedData/Build/Products/Release-iphoneos/GCamStyle.app"
           rm -rf Payload GCamStyle-iOS-resignable.ipa
-          mkdir Payload
+          mkdir -p Payload
           cp -R "$APP" Payload/
           /usr/bin/zip -qry GCamStyle-iOS-resignable.ipa Payload
+          /usr/bin/unzip -tq GCamStyle-iOS-resignable.ipa
           ls -lh GCamStyle-iOS-resignable.ipa
 
-      - name: Upload IPA
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: GCamStyle-build-diagnostics
+          path: |
+            ${{ runner.temp }}/xcodebuild.log
+            ${{ runner.temp }}/GCamDerivedData/Build/Products/Release-iphoneos/GCamStyle.app/Info.plist
+          if-no-files-found: ignore
+
+      - name: Upload resignable IPA
         uses: actions/upload-artifact@v4
         with:
           name: GCamStyle-iOS-resignable-IPA
