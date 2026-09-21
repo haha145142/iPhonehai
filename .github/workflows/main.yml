@@ -2,8 +2,7 @@ name: GCamStyle iOS Cloud Build
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
 
 jobs:
@@ -16,13 +15,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Show Xcode and SDK
+      - name: Xcode
         run: |
           xcodebuild -version
           xcode-select -p
-          xcodebuild -showsdks | grep -E 'iphoneos|iphonesimulator' || true
+          xcodebuild -showsdks | grep -E 'iphoneos' | tail -5 || true
 
-      - name: Validate project files
+      - name: Validate project
         run: |
           test -f GCamStyle.xcodeproj/project.pbxproj
           test -f GCamStyle.xcodeproj/xcshareddata/xcschemes/GCamStyle.xcscheme
@@ -30,7 +29,7 @@ jobs:
           test -f GCamStyle/Info.plist
           xcodebuild -project GCamStyle.xcodeproj -list
 
-      - name: Build device app without signing
+      - name: Build for iPhone
         run: |
           rm -rf "$RUNNER_TEMP/GCamDerivedData"
           xcodebuild \
@@ -46,18 +45,19 @@ jobs:
             AD_HOC_CODE_SIGNING_ALLOWED=NO \
             build
 
-      - name: Locate app
+      - name: Verify Mach-O
         run: |
           APP="$RUNNER_TEMP/GCamDerivedData/Build/Products/Release-iphoneos/GCamStyle.app"
           test -d "$APP"
-          /usr/bin/file "$APP/GCamStyle"
-          echo "APP=$APP" >> "$GITHUB_ENV"
+          test -f "$APP/GCamStyle"
+          file "$APP/GCamStyle"
+          /usr/bin/codesign --display --verbose=4 "$APP" || true
 
-      - name: Package unsigned IPA
+      - name: Package IPA
         run: |
           rm -rf Payload GCamStyle-iOS-unsigned.ipa
           mkdir Payload
-          cp -R "$APP" Payload/
+          cp -R "$RUNNER_TEMP/GCamDerivedData/Build/Products/Release-iphoneos/GCamStyle.app" Payload/
           /usr/bin/zip -qry GCamStyle-iOS-unsigned.ipa Payload
           ls -lh GCamStyle-iOS-unsigned.ipa
 
