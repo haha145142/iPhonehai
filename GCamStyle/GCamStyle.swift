@@ -260,7 +260,7 @@ final class CameraEngine: NSObject, ObservableObject {
         if session.canAddOutput(videoOutput) {
             session.addOutput(videoOutput)
             if let connection = videoOutput.connection(with: .video) {
-                connection.videoOrientation = .portrait
+                connection.videoRotationAngle = 90
             }
         }
 
@@ -306,7 +306,7 @@ final class CameraEngine: NSObject, ObservableObject {
             currentInput = newInput
         }
         if let connection = videoOutput.connection(with: .video) {
-            connection.videoOrientation = .portrait
+            connection.videoRotationAngle = 90
         }
         session.commitConfiguration()
     }
@@ -744,7 +744,7 @@ struct LiveCameraPreview: UIViewRepresentable {
         view.activePreset = preset
         output.setSampleBufferDelegate(view, queue: DispatchQueue(label: "GCamStyle.preview"))
         if let connection = output.connection(with: .video) {
-            connection.videoOrientation = .portrait
+            connection.videoRotationAngle = 90
         }
         return view
     }
