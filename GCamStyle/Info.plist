@@ -26,6 +26,8 @@
 	<string>用于 Live Photo 记录现场声音。</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>用于将处理后的照片、RAW 和 Live Photo 保存到照片图库。</string>
+	<key>UIRequiresFullScreen</key>
+	<true/>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
