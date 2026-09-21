@@ -1,6 +1,7 @@
 import SwiftUI
-import AVFoundation
-import Photos
+import Combine
+@preconcurrency import AVFoundation
+@preconcurrency import Photos
 import PhotosUI
 import ImageIO
 import UniformTypeIdentifiers
