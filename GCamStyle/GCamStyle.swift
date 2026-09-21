@@ -699,7 +699,17 @@ enum AGCMapper {
                 config.profileNumber("lib_sharp_gain_macro_key", profile: index) ??
                 0.25
 
-            let sharpness = clamp(sharp, 0.05, 1.0)
+            let frameCount =
+                config.profileInt("lib_pref_frame_count_key", profile: index) ??
+                config.profileInt("lib_pref_frame_count_zsl_key", profile: index) ??
+                config.profileInt("lib_pref_frame_count_ns_key", profile: index) ??
+                config.int("pref_frame_count_key")
+
+            let sharpness = clamp(
+                sharp * (frameCount.map { min(1.12, 1.0 + Double($0) / 240.0) } ?? 1.0),
+                0.05,
+                1.0
+            )
 
             let denoise =
                 config.profileNumber("lib_noise_reduction_adjust_key", profile: index) ??
@@ -709,9 +719,26 @@ enum AGCMapper {
                 config.number("lib_noise_reduction_adjust_key") ??
                 0.0
 
-            let warmth = clamp((r - b) * 8.0 + globalHue / 30.0, -12.0, 12.0)
+            let colorTransform =
+                config.profileNumber("lib_pref_color_transform_key", profile: index) ??
+                config.number("lib_pref_color_transform_key") ??
+                0.0
+            let colorEnabled =
+                config.profileInt("lib_enable_color_key", profile: index) ??
+                config.int("lib_enable_color_key") ??
+                1
+
+            let warmth = clamp(
+                (r - b) * 8.0 +
+                globalHue / 30.0 +
+                (colorEnabled == 0 ? -1.0 : 0.0),
+                -12.0,
+                12.0
+            )
             let tint = clamp(
-                (g - ((r + b) / 2.0)) * 6.0 + (globalHue / 45.0),
+                (g - ((r + b) / 2.0)) * 6.0 +
+                (globalHue / 45.0) +
+                (colorTransform.truncatingRemainder(dividingBy: 7.0) - 3.0) * 0.22,
                 -8.0,
                 8.0
             )
@@ -1073,6 +1100,7 @@ final class CameraEngine: NSObject, ObservableObject {
     fileprivate func handleRaw(
         data: Data,
         preset: CameraPreset,
+        watermark: Bool,
         metadata: MetadataDraft,
         watermarkConfig: CustomWatermarkConfig
     ) {
@@ -1118,7 +1146,7 @@ final class CameraEngine: NSObject, ObservableObject {
                         cgImage: cg,
                         preset: preset,
                         metadata: metadata,
-                        watermark: true,
+                        watermark: watermark,
                         watermarkConfig: watermarkConfig,
                         sourceProperties: [:]
                     )
@@ -1159,25 +1187,36 @@ final class CameraEngine: NSObject, ObservableObject {
         Task {
             let result = await Task.detached(priority: .userInitiated) {
                 Result {
-                    try ExportService.renderToJPEG(
+                    let originalStillURL = FileManager.default.temporaryDirectory
+                        .appendingPathComponent("风格相机-实况原图-\(UUID().uuidString).jpg")
+                    try stillData.write(to: originalStillURL, options: .atomic)
+
+                    let styledURL = try ExportService.renderToJPEG(
                         sourceData: stillData,
                         preset: preset,
                         watermark: watermark,
                         metadata: metadata,
                         watermarkConfig: watermarkConfig
                     )
+
+                    return (originalStillURL, styledURL)
                 }
             }.value
 
             switch result {
-            case .success(let styledURL):
-                await PhotoSaver.saveLivePhoto(stillURL: styledURL, movieURL: movieURL)
+            case .success(let urls):
+                // 保留 AVFoundation 原始静态图 + 原始视频的配对信息；
+                // 风格化照片单独保存，避免破坏实况照片的配对标识。
+                await PhotoSaver.saveLivePhoto(stillURL: urls.0, movieURL: movieURL)
+                await PhotoSaver.saveJPEG(url: urls.1)
+
                 do {
-                    self.lastImage = try PreviewImageFactory.makeThumbnail(from: styledURL, maxPixel: 1600)
-                    self.lastSavedURL = styledURL
+                    self.lastImage = try PreviewImageFactory.makeThumbnail(from: urls.1, maxPixel: 1600)
+                    self.lastSavedURL = urls.1
                 } catch {
                     self.errorMessage = "实况照片已保存，但预览生成失败。"
                 }
+
             case .failure(let error):
                 self.errorMessage = "实况照片处理失败：\(error.localizedDescription)"
             }
@@ -1185,6 +1224,7 @@ final class CameraEngine: NSObject, ObservableObject {
             self.endProcessing()
         }
     }
+
 }
 
 // MARK: - 拍照代理
@@ -1283,6 +1323,7 @@ final class CaptureProcessorDelegate: NSObject, AVCapturePhotoCaptureDelegate {
                 owner.handleRaw(
                     data: rawData,
                     preset: self.preset,
+                    watermark: self.watermark,
                     metadata: self.metadata,
                     watermarkConfig: self.watermarkConfig
                 )
@@ -2439,13 +2480,16 @@ struct ContentView: View {
                     .disabled(agcStore.imported.isEmpty)
 
                     if !agcStore.sourceName.isEmpty {
-                        Text("当前：\(agcStore.sourceName)")
+                        Text("当前配置：\(agcStore.sourceName)")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
 
                     Button {
-                        showAGCImporter = true
+                        showSettings = false
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                            showAGCImporter = true
+                        }
                     } label: {
                         Label("＋ 添加安卓配置文件", systemImage: "folder.badge.plus")
                     }
