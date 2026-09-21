@@ -231,7 +231,7 @@ enum LUT3DParser {
         let expected = size * size * size
         guard values.count >= expected else {
             throw NSError(domain: "GCamStyleLUT", code: 3, userInfo: [
-                NSLocalizedDescriptionKey: "色彩曲线数据不完整：需要 (expected) 个颜色点，实际只有 (values.count) 个。"
+                NSLocalizedDescriptionKey: "色彩曲线数据不完整：需要 \(expected) 个颜色点，实际只有 \(values.count) 个。"
             ])
         }
 
@@ -480,16 +480,22 @@ struct AGCConfig {
             ids.formUnion(0..<count)
         }
 
-        let pattern = #"^lib_profile_title_key_p(\d+)_0$"#
-        if let regex = try? NSRegularExpression(pattern: pattern) {
+        // AGC 常见格式：任意配置键末尾带 _p<档案编号>_0。
+        // 不再只依赖某一个标题键。
+        let patterns = [
+            #"^.+_p(\d+)_0$"#,
+            #"^.+_profile_(\d+)_0$"#
+        ]
+
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
             for key in values.keys {
                 let ns = key as NSString
                 let range = NSRange(location: 0, length: ns.length)
-                if let match = regex.firstMatch(in: key, range: range),
-                   let numberRange = Range(match.range(at: 1), in: key),
-                   let id = Int(key[numberRange]) {
-                    ids.insert(id)
-                }
+                guard let match = regex.firstMatch(in: key, range: range),
+                      let numberRange = Range(match.range(at: 1), in: key),
+                      let id = Int(key[numberRange]) else { continue }
+                ids.insert(id)
             }
         }
 
@@ -497,7 +503,10 @@ struct AGCConfig {
     }
 
     func profileTitle(_ index: Int) -> String {
-        profileValue("lib_profile_title_key", profile: index) ?? "配置 \(index + 1)"
+        profileValue("lib_profile_title_key", profile: index)
+            ?? profileValue("pref_patch_profile_title_key", profile: index)
+            ?? profileValue("lib_profile_name_key", profile: index)
+            ?? "配置 \(index + 1)"
     }
 
     func profileTitles() -> [String] {
@@ -2065,6 +2074,16 @@ struct ContentView: View {
                 .padding(.vertical, 9)
                 .background(.ultraThinMaterial, in: Capsule())
                 .overlay(Capsule().stroke(.white.opacity(0.13)))
+            }
+
+            Button {
+                showPresetPicker = true
+            } label: {
+                Image(systemName: "folder.badge.plus")
+                    .font(.system(size: 15, weight: .semibold))
+                    .frame(width: 40, height: 40)
+                    .background(.ultraThinMaterial, in: Circle())
+                    .overlay(Circle().stroke(.white.opacity(0.13)))
             }
 
             Button {
