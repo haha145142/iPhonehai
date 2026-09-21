@@ -100,6 +100,29 @@ jobs:
           /usr/bin/unzip -tq GCamStyle-iOS-resignable.ipa
           ls -lh GCamStyle-iOS-resignable.ipa
 
+      - name: iOS 27 simulator build smoke test
+        run: |
+          set -euxo pipefail
+
+          echo "可用 iOS 模拟器运行时："
+          /usr/bin/xcrun simctl list runtimes
+
+          echo "编译模拟器版本（不依赖模拟器启动）"
+          rm -rf "$RUNNER_TEMP/GCamSimulator"
+          xcodebuild \
+            -project GCamStyle.xcodeproj \
+            -scheme GCamStyle \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/GCamSimulator" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            build
+
+          test -d "$RUNNER_TEMP/GCamSimulator/Build/Products/Debug-iphonesimulator/GCamStyle.app"
+          test -f "$RUNNER_TEMP/GCamSimulator/Build/Products/Debug-iphonesimulator/GCamStyle.app/GCamStyle"
+
       - name: Upload diagnostics
         if: always()
         uses: actions/upload-artifact@v7
