@@ -319,7 +319,7 @@ final class AGCXMLParser: NSObject, XMLParserDelegate {
         parser.delegate = self
         guard parser.parse() else {
             throw NSError(domain: "GCamStyleAGC", code: 1, userInfo: [
-                NSLocalizedDescriptionKey: parser.parserError?.localizedDescription ?? "AGC 文件不是有效 XML"
+                NSLocalizedDescriptionKey: parser.parserError?.localizedDescription ?? "安卓配置文件格式无法识别；请使用与对应版本相符的配置文件。"
             ])
         }
         return config
@@ -448,6 +448,7 @@ final class CameraEngine: NSObject, ObservableObject {
 
     private var currentInput: AVCaptureDeviceInput?
     private var delegates: [Int64: CaptureProcessorDelegate] = [:]
+    private var orientationObserver: NSObjectProtocol?
 
     override init() {
         super.init()
@@ -628,6 +629,12 @@ final class CameraEngine: NSObject, ObservableObject {
 
         delegates[settings.uniqueID] = delegate
         photoOutput.capturePhoto(with: settings, delegate: delegate)
+    }
+
+    func clearPreview() {
+        lastImage = nil
+        lastSavedURL = nil
+        errorMessage = nil
     }
 
     func importPhoto(_ data: Data, preset: CameraPreset, watermark: Bool, metadata: MetadataDraft) {
