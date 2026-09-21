@@ -22,8 +22,8 @@ enum CaptureMode: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .photo: return "照片"
-        case .proRAW: return "ProRAW"
-        case .livePhoto: return "实况"
+        case .proRAW: return "原始"
+        case .livePhoto: return "实况照片"
         }
     }
 }
@@ -35,7 +35,7 @@ struct MetadataDraft: Hashable {
     var lens = ""
     var artist = ""
     var copyright = ""
-    var software = "GCamStyle iOS"
+    var software = "风格相机"
     var dateOriginal = ""
     var stripGPS = false
 }
@@ -107,6 +107,67 @@ enum WatermarkAccent {
         case .ricoh: return UIColor(red: 0.90, green: 0.20, blue: 0.12, alpha: 1)
         case .neutral: return UIColor.white
         }
+    }
+}
+
+private extension CameraPreset {
+    var chineseBrand: String {
+        switch brand.uppercased() {
+        case "LEICA": return "徕卡"
+        case "HASSELBLAD": return "哈苏"
+        case "ZEISS": return "蔡司"
+        case "VIVO": return "维沃"
+        case "XIAOMI": return "小米"
+        case "HUAWEI": return "华为"
+        case "OPPO": return "欧珀"
+        case "GOOGLE": return "谷歌"
+        case "APPLE": return "苹果"
+        case "SONY": return "索尼"
+        case "CANON": return "佳能"
+        case "NIKON": return "尼康"
+        case "FUJIFILM": return "富士胶片"
+        case "RICOH": return "理光"
+        case "PANASONIC": return "松下"
+        case "SIGMA": return "适马"
+        default: return brand
+        }
+    }
+
+    var chineseStyle: String {
+        switch style.lowercased() {
+        case "natural": return "自然"
+        case "cinematic": return "电影"
+        case "portrait": return "人像"
+        case "street": return "街拍"
+        default: return style
+        }
+    }
+
+    var chineseModel: String {
+        let mappings = [
+            "X200 Ultra": "X200 至尊版",
+            "X200 Pro": "X200 专业版",
+            "X100 Ultra": "X100 至尊版",
+            "15 Ultra": "15 至尊版",
+            "14 Ultra": "14 至尊版",
+            "Pura 70 Ultra": "Pura 70 至尊版",
+            "Mate 70 Pro": "Mate 70 专业版",
+            "Find X8 Ultra": "Find X8 至尊版",
+            "Find X7 Ultra": "Find X7 至尊版",
+            "Pixel 10 Pro": "Pixel 10 专业版",
+            "Pixel 9 Pro": "Pixel 9 专业版",
+            "iPhone 17 Pro Max": "iPhone 17 专业 Max",
+            "iPhone 17 Pro": "iPhone 17 专业版",
+            "iPhone 16 Pro": "iPhone 16 专业版",
+            "EOS R5 Mark II": "EOS R5 Mark II",
+            "EOS R6 Mark II": "EOS R6 Mark II",
+            "X2D 100C": "X2D 100C",
+            "X100VI": "X100VI",
+            "GR IIIx": "GR IIIx",
+            "S1RII": "S1RII",
+            "fp L": "fp L"
+        ]
+        return mappings[model] ?? model
     }
 }
 
@@ -266,9 +327,9 @@ final class CameraEngine: NSObject, ObservableObject {
         ]
         if session.canAddOutput(videoOutput) {
             session.addOutput(videoOutput)
-            if let connection = videoOutput.connection(with: .video) {
-                connection.videoRotationAngle = 90
-            }
+            // Custom Metal preview rotates the CIImage itself. Do not rotate
+            // the VideoDataOutput connection as that would apply another
+            // hardware rotation and caused the portrait preview to appear sideways.
         }
 
         if session.canAddOutput(photoOutput) {
@@ -312,9 +373,6 @@ final class CameraEngine: NSObject, ObservableObject {
             session.addInput(newInput)
             currentInput = newInput
         }
-        if let connection = videoOutput.connection(with: .video) {
-            connection.videoRotationAngle = 90
-        }
         session.commitConfiguration()
     }
 
@@ -338,7 +396,7 @@ final class CameraEngine: NSObject, ObservableObject {
         case .proRAW:
             guard proRAWSupported else {
                 isCapturing = false
-                errorMessage = "这台 iPhone/当前配置不支持 Apple ProRAW。"
+                errorMessage = "当前设备或相机配置不支持苹果原始格式。"
                 return
             }
 
@@ -346,7 +404,7 @@ final class CameraEngine: NSObject, ObservableObject {
                 where: { AVCapturePhotoOutput.isAppleProRAWPixelFormat($0) }
             ) else {
                 isCapturing = false
-                errorMessage = "没有可用的 Apple ProRAW 格式。"
+                errorMessage = "当前没有可用的原始照片格式。"
                 return
             }
 
@@ -366,7 +424,7 @@ final class CameraEngine: NSObject, ObservableObject {
         case .livePhoto:
             guard livePhotoSupported else {
                 isCapturing = false
-                errorMessage = "这台 iPhone 不支持 Live Photo 捕获。"
+                errorMessage = "当前设备不支持实况照片。"
                 return
             }
 
@@ -455,7 +513,7 @@ final class CameraEngine: NSObject, ObservableObject {
             await PhotoSaver.saveJPEG(url: url)
 
             if mode == .proRAW {
-                errorMessage = "ProRAW + 风格化 JPEG 已保存。原始 ProRAW 保持未修改。"
+                errorMessage = "原始照片与风格照片均已保存。原始文件未修改。"
             } else if mode == .photo {
                 errorMessage = nil
             }
@@ -511,7 +569,7 @@ final class CameraEngine: NSObject, ObservableObject {
                 lens: preset.lens,
                 artist: "",
                 copyright: "",
-                software: "GCamStyle iOS ProRAW",
+                software: "风格相机原始照片",
                 dateOriginal: "",
                 stripGPS: false
             )
@@ -528,7 +586,7 @@ final class CameraEngine: NSObject, ObservableObject {
                 DispatchQueue.main.async {
                     self.lastImage = image
                     self.lastSavedURL = styledURL
-                    self.errorMessage = "ProRAW 原文件与风格化 JPEG 均已保存。"
+                    self.errorMessage = "原始照片与风格照片均已保存。"
                 }
                 Task { await PhotoSaver.saveJPEG(url: styledURL) }
             }
@@ -552,7 +610,7 @@ final class CameraEngine: NSObject, ObservableObject {
                 await PhotoSaver.saveLivePhoto(stillURL: stillURL, movieURL: movieURL)
             }
         } catch {
-            errorMessage = "Live Photo 保存失败：\(error.localizedDescription)"
+            errorMessage = "实况照片保存失败：\(error.localizedDescription)"
         }
 
         // Also create the user's stylized still copy. The original Live Photo pair stays intact.
@@ -780,10 +838,7 @@ struct LiveCameraPreview: UIViewRepresentable {
     func makeUIView(context: Context) -> LivePreviewView {
         let view = LivePreviewView()
         view.activePreset = preset
-        output.setSampleBufferDelegate(view, queue: DispatchQueue(label: "GCamStyle.preview"))
-        if let connection = output.connection(with: .video) {
-            connection.videoRotationAngle = 90
-        }
+        output.setSampleBufferDelegate(view, queue: DispatchQueue(label: "风格相机预览"))
         return view
     }
 
@@ -875,7 +930,7 @@ enum ExportService {
             let source = CGImageSourceCreateWithData(sourceData as CFData, nil),
             let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
         else {
-            throw NSError(domain: "GCamStyle", code: 1, userInfo: [
+            throw NSError(domain: "风格相机", code: 1, userInfo: [
                 NSLocalizedDescriptionKey: "无法读取照片"
             ])
         }
@@ -960,65 +1015,281 @@ enum WatermarkRenderer {
         let renderer = UIGraphicsImageRenderer(size: size)
 
         return renderer.image { context in
-            let rect = CGRect(origin: .zero, size: size)
-            UIImage(cgImage: cgImage).draw(in: rect)
+            UIImage(cgImage: cgImage).draw(in: CGRect(origin: .zero, size: size))
 
-            let bandHeight = max(110, size.height * 0.095)
-            let band = CGRect(
-                x: 0,
-                y: size.height - bandHeight,
-                width: size.width,
-                height: bandHeight
-            )
-
-            UIColor.black.withAlphaComponent(0.74).setFill()
-            context.fill(band)
-
-            let accent = preset.watermarkAccent.uiColor
-            accent.setFill()
-
-            switch preset.style {
-            case "Cinematic":
-                context.fill(CGRect(x: 0, y: band.minY, width: 9, height: band.height))
-            case "Portrait":
-                context.fill(CGRect(x: 0, y: band.minY, width: band.width, height: 4))
-            case "Street":
-                context.fill(CGRect(x: band.width - 9, y: band.minY, width: 9, height: band.height))
+            switch preset.brand.uppercased() {
+            case "LEICA":
+                drawLeica(context, size, preset)
+            case "HASSELBLAD":
+                drawHasselblad(context, size, preset)
+            case "ZEISS":
+                drawZeiss(context, size, preset)
+            case "VIVO":
+                drawVivo(context, size, preset)
+            case "XIAOMI":
+                drawXiaomi(context, size, preset)
+            case "HUAWEI":
+                drawHuawei(context, size, preset)
+            case "OPPO":
+                drawOppo(context, size, preset)
+            case "GOOGLE":
+                drawGoogle(context, size, preset)
+            case "APPLE":
+                drawApple(context, size, preset)
+            case "SONY":
+                drawSony(context, size, preset)
+            case "CANON":
+                drawCanon(context, size, preset)
+            case "NIKON":
+                drawNikon(context, size, preset)
+            case "FUJIFILM":
+                drawFujifilm(context, size, preset)
+            case "RICOH":
+                drawRicoh(context, size, preset)
             default:
-                context.fill(CGRect(x: 0, y: band.minY, width: band.width, height: 2))
+                drawGeneric(context, size, preset)
             }
-
-            let x = max(28, size.width * 0.028)
-            let headerY = band.minY + band.height * 0.18
-            let footerY = band.minY + band.height * 0.58
-
-            let headerFont = UIFont.systemFont(
-                ofSize: max(22, size.width / 58),
-                weight: .bold
-            )
-            let footerFont = UIFont.monospacedSystemFont(
-                ofSize: max(13, size.width / 96),
-                weight: .medium
-            )
-
-            let header = "\(preset.brand)  \(preset.model)"
-            let footer = "\(preset.lens)   \(preset.focal)   \(preset.aperture)   \(preset.shutter)   \(preset.iso)"
-
-            (header as NSString).draw(
-                at: CGPoint(x: x, y: headerY),
-                withAttributes: [
-                    .font: headerFont,
-                    .foregroundColor: UIColor.white
-                ]
-            )
-            (footer as NSString).draw(
-                at: CGPoint(x: x, y: footerY),
-                withAttributes: [
-                    .font: footerFont,
-                    .foregroundColor: UIColor.white.withAlphaComponent(0.86)
-                ]
-            )
         }
+    }
+
+    private static func info(_ preset: CameraPreset) -> String {
+        "(preset.focal)  ·  (preset.aperture)  ·  (preset.shutter)  ·  (preset.iso)"
+    }
+
+    private static func fonts(_ size: CGSize) -> (UIFont, UIFont) {
+        (
+            UIFont.systemFont(ofSize: max(24, size.width / 58), weight: .bold),
+            UIFont.monospacedSystemFont(ofSize: max(13, size.width / 100), weight: .medium)
+        )
+    }
+
+    private static func drawLeica(_ context: UIGraphicsImageRendererContext, _ size: CGSize, _ p: CameraPreset) {
+        let band = CGRect(x: 0, y: 0, width: max(102, size.width * 0.105), height: size.height)
+        UIColor.black.withAlphaComponent(0.78).setFill()
+        context.fill(band)
+        UIColor(red: 0.86, green: 0.08, blue: 0.08, alpha: 1).setFill()
+        context.fill(CGRect(x: band.width - 6, y: 0, width: 6, height: band.height))
+
+        context.cgContext.saveGState()
+        context.cgContext.translateBy(x: band.width * 0.50, y: size.height - 34)
+        context.cgContext.rotate(by: -.pi / 2)
+        let (hf, sf) = fonts(size)
+        ("(p.exifMake)  (p.exifModel)" as NSString).draw(
+            at: CGPoint(x: 0, y: -hf.lineHeight),
+            withAttributes: [.font: hf, .foregroundColor: UIColor.white]
+        )
+        (p.lens as NSString).draw(
+            at: CGPoint(x: 0, y: 8),
+            withAttributes: [.font: sf, .foregroundColor: UIColor.white.withAlphaComponent(0.86)]
+        )
+        (info(p) as NSString).draw(
+            at: CGPoint(x: 0, y: 30),
+            withAttributes: [.font: sf, .foregroundColor: UIColor.white.withAlphaComponent(0.72)]
+        )
+        context.cgContext.restoreGState()
+    }
+
+    private static func drawHasselblad(_ context: UIGraphicsImageRendererContext, _ size: CGSize, _ p: CameraPreset) {
+        let h = max(132, size.height * 0.11)
+        let band = CGRect(x: 0, y: size.height - h, width: size.width, height: h)
+        UIColor.black.withAlphaComponent(0.58).setFill()
+        context.fill(band)
+        let accent = UIColor(red: 0.96, green: 0.55, blue: 0.08, alpha: 1)
+        accent.setFill()
+        context.fill(CGRect(x: 0, y: band.minY, width: 150, height: 7))
+        let (hf, sf) = fonts(size)
+        let x = 42.0
+        ("(p.exifMake)  (p.exifModel)" as NSString).draw(at: CGPoint(x:x, y:band.minY+23),
+            withAttributes:[.font:hf,.foregroundColor:UIColor.white])
+        ("中画幅  ·  (p.lens)  ·  (info(p))" as NSString).draw(at: CGPoint(x:x, y:band.minY+70),
+            withAttributes:[.font:sf,.foregroundColor:UIColor.white.withAlphaComponent(0.84)])
+        let square = CGRect(x: size.width - 72, y: band.minY + 28, width: 38, height: 38)
+        accent.setFill()
+        context.fill(square)
+    }
+
+    private static func drawZeiss(_ context: UIGraphicsImageRendererContext, _ size: CGSize, _ p: CameraPreset) {
+        let w = min(size.width * 0.78, 980)
+        let h = 96.0
+        let rect = CGRect(x: (size.width-w)/2, y: size.height-h-30, width:w, height:h)
+        UIColor.black.withAlphaComponent(0.68).setFill()
+        context.cgContext.fillEllipse(in: rect.insetBy(dx: 0, dy: 0))
+        UIColor(red: 0.18, green: 0.55, blue: 0.92, alpha: 1).setFill()
+        context.fill(CGRect(x: rect.minX + 28, y: rect.minY + 10, width: rect.width - 56, height: 4))
+        let (hf,sf)=fonts(size)
+        ("(p.exifMake)  (p.exifModel)" as NSString).draw(at: CGPoint(x:rect.minX+34,y:rect.minY+23),
+            withAttributes:[.font:hf,.foregroundColor:UIColor.white])
+        ("自然色彩  ·  (p.lens)  ·  (info(p))" as NSString).draw(at: CGPoint(x:rect.minX+36,y:rect.minY+65),
+            withAttributes:[.font:sf,.foregroundColor:UIColor.white.withAlphaComponent(0.84)])
+    }
+
+    private static func drawVivo(_ context: UIGraphicsImageRendererContext, _ size: CGSize, _ p: CameraPreset) {
+        let w = min(size.width * 0.72, 900)
+        let h = 116.0
+        let rect = CGRect(x: size.width - w - 28, y: size.height - h - 34, width:w, height:h)
+        UIColor.black.withAlphaComponent(0.64).setFill()
+        context.cgContext.fill(rect)
+        UIColor(red:0.18,green:0.55,blue:0.92,alpha:1).setFill()
+        context.fill(CGRect(x:rect.minX, y:rect.minY, width:8, height:rect.height))
+        let (hf,sf)=fonts(size)
+        ("vivo  ·  (p.exifModel)" as NSString).draw(at: CGPoint(x:rect.minX+28,y:rect.minY+22),
+            withAttributes:[.font:hf,.foregroundColor:UIColor.white])
+        ("蔡司联合影像  ·  (p.lens)" as NSString).draw(at: CGPoint(x:rect.minX+30,y:rect.minY+66),
+            withAttributes:[.font:sf,.foregroundColor:UIColor.white.withAlphaComponent(0.88)])
+        ("(info(p))" as NSString).draw(at: CGPoint(x:rect.minX+30,y:rect.minY+89),
+            withAttributes:[.font:sf,.foregroundColor:UIColor.white.withAlphaComponent(0.72)])
+    }
+
+    private static func drawXiaomi(_ context: UIGraphicsImageRendererContext, _ size: CGSize, _ p: CameraPreset) {
+        let w = min(size.width * 0.70, 920)
+        let h = 124.0
+        let rect = CGRect(x: 26, y: size.height-h-30, width:w, height:h)
+        UIColor.black.withAlphaComponent(0.67).setFill()
+        context.fill(rect)
+        UIColor(red:0.95,green:0.35,blue:0.08,alpha:1).setFill()
+        context.fill(CGRect(x:rect.minX, y:rect.minY, width:12, height:rect.height))
+        let (hf,sf)=fonts(size)
+        ("小米  (p.exifModel)" as NSString).draw(at: CGPoint(x:rect.minX+30,y:rect.minY+20),
+            withAttributes:[.font:hf,.foregroundColor:UIColor.white])
+        ("徕卡影像  ·  (p.style == "Portrait" ? "人像" : "自然")" as NSString).draw(at: CGPoint(x:rect.minX+32,y:rect.minY+64),
+            withAttributes:[.font:sf,.foregroundColor:UIColor.white.withAlphaComponent(0.88)])
+        ("(info(p))" as NSString).draw(at: CGPoint(x:rect.minX+32,y:rect.minY+91),
+            withAttributes:[.font:sf,.foregroundColor:UIColor.white.withAlphaComponent(0.72)])
+    }
+
+    private static func drawHuawei(_ context: UIGraphicsImageRendererContext, _ size: CGSize, _ p: CameraPreset) {
+        let h = 106.0
+        let rect = CGRect(x: size.width - 470, y: 30, width: 440, height: h)
+        UIColor.black.withAlphaComponent(0.48).setFill()
+        context.fill(rect)
+        UIColor(red:0.88,green:0.08,blue:0.12,alpha:1).setFill()
+        context.fill(CGRect(x:rect.minX, y:rect.minY, width:5, height:rect.height))
+        let (_,sf)=fonts(size)
+        let hf=UIFont.systemFont(ofSize:max(26,size.width/62),weight:.bold)
+        ("华为  (p.exifModel)" as NSString).draw(at: CGPoint(x:rect.minX+24,y:rect.minY+19),
+            withAttributes:[.font:hf,.foregroundColor:UIColor.white])
+        ("影像风格  ·  (p.lens)" as NSString).draw(at: CGPoint(x:rect.minX+26,y:rect.minY+59),
+            withAttributes:[.font:sf,.foregroundColor:UIColor.white.withAlphaComponent(0.86)])
+    }
+
+    private static func drawOppo(_ context: UIGraphicsImageRendererContext, _ size: CGSize, _ p: CameraPreset) {
+        let h = 74.0
+        UIColor.black.withAlphaComponent(0.52).setFill()
+        context.fill(CGRect(x:0,y:size.height-h,width:size.width,height:h))
+        UIColor(red:0.35,green:0.80,blue:0.45,alpha:1).setFill()
+        context.fill(CGRect(x:0,y:size.height-h,width:size.width,height:3))
+        let (_,sf)=fonts(size)
+        let text="欧珀  (p.exifModel)  ·  哈苏人像  ·  (info(p))"
+        (text as NSString).draw(at: CGPoint(x:34,y:size.height-h+27),
+            withAttributes:[.font:sf,.foregroundColor:UIColor.white.withAlphaComponent(0.9)])
+    }
+
+    private static func drawGoogle(_ context: UIGraphicsImageRendererContext, _ size: CGSize, _ p: CameraPreset) {
+        let w = min(640, size.width*0.48)
+        let h = 90.0
+        let rect = CGRect(x:size.width-w-24,y:size.height-h-28,width:w,height:h)
+        UIColor.white.withAlphaComponent(0.88).setFill()
+        context.fill(rect)
+        let (_,sf)=fonts(size)
+        let hf=UIFont.systemFont(ofSize:max(23,size.width/70),weight:.bold)
+        ("谷歌  (p.exifModel)" as NSString).draw(at:CGPoint(x:rect.minX+22,y:rect.minY+15),
+            withAttributes:[.font:hf,.foregroundColor:UIColor.black])
+        ("计算摄影  ·  (info(p))" as NSString).draw(at:CGPoint(x:rect.minX+24,y:rect.minY+53),
+            withAttributes:[.font:sf,.foregroundColor:UIColor.black.withAlphaComponent(0.72)])
+    }
+
+    private static func drawApple(_ context: UIGraphicsImageRendererContext, _ size: CGSize, _ p: CameraPreset) {
+        let (_,sf)=fonts(size)
+        let text="苹果  (p.exifModel)  ·  (info(p))"
+        let attrs:[NSAttributedString.Key:Any]=[.font:sf,.foregroundColor:UIColor.white]
+        let measured=(text as NSString).size(withAttributes:attrs)
+        let rect=CGRect(x:(size.width-measured.width)/2-22,y:size.height-64,width:measured.width+44,height:38)
+        UIColor.black.withAlphaComponent(0.46).setFill()
+        context.fill(rect)
+        (text as NSString).draw(at:CGPoint(x:rect.minX+22,y:rect.minY+10),withAttributes:attrs)
+    }
+
+    private static func drawSony(_ context: UIGraphicsImageRendererContext, _ size: CGSize, _ p: CameraPreset) {
+        let band=CGRect(x:0,y:0,width:max(110,size.width*0.09),height:size.height)
+        UIColor.black.withAlphaComponent(0.72).setFill()
+        context.fill(band)
+        let (_,sf)=fonts(size)
+        context.cgContext.saveGState()
+        context.cgContext.translateBy(x:band.width*0.5,y:size.height-28)
+        context.cgContext.rotate(by:-.pi/2)
+        let hf=UIFont.systemFont(ofSize:max(24,size.width/66),weight:.bold)
+        ("索尼  (p.exifModel)" as NSString).draw(at:CGPoint(x:0,y:-hf.lineHeight),withAttributes:[.font:hf,.foregroundColor:UIColor.white])
+        ("(p.lens)  ·  (info(p))" as NSString).draw(at:CGPoint(x:0,y:10),withAttributes:[.font:sf,.foregroundColor:UIColor.white.withAlphaComponent(0.8)])
+        context.cgContext.restoreGState()
+    }
+
+    private static func drawCanon(_ context: UIGraphicsImageRendererContext, _ size: CGSize, _ p: CameraPreset) {
+        let w=min(600,size.width*0.45), h=96.0
+        let rect=CGRect(x:size.width-w-28,y:size.height-h-28,width:w,height:h)
+        UIColor.white.withAlphaComponent(0.90).setFill()
+        context.fill(rect)
+        UIColor(red:0.75,green:0.10,blue:0.08,alpha:1).setFill()
+        context.fill(CGRect(x:rect.minX,y:rect.minY,width:10,height:rect.height))
+        let (_,sf)=fonts(size)
+        let hf=UIFont.systemFont(ofSize:max(22,size.width/70),weight:.bold)
+        ("佳能  (p.exifModel)" as NSString).draw(at:CGPoint(x:rect.minX+26,y:rect.minY+15),withAttributes:[.font:hf,.foregroundColor:UIColor.black])
+        ("(p.lens)  ·  (info(p))" as NSString).draw(at:CGPoint(x:rect.minX+28,y:rect.minY+55),withAttributes:[.font:sf,.foregroundColor:UIColor.black.withAlphaComponent(0.72)])
+    }
+
+    private static func drawNikon(_ context: UIGraphicsImageRendererContext, _ size: CGSize, _ p: CameraPreset) {
+        let rect=CGRect(x:30,y:30,width:min(650,size.width*0.46),height:82)
+        UIColor.black.withAlphaComponent(0.46).setFill()
+        context.fill(rect)
+        UIColor(red:0.95,green:0.78,blue:0.08,alpha:1).setFill()
+        context.fill(CGRect(x:rect.minX,y:rect.maxY-5,width:rect.width,height:5))
+        let (_,sf)=fonts(size)
+        let hf=UIFont.systemFont(ofSize:max(23,size.width/70),weight:.bold)
+        ("尼康  (p.exifModel)" as NSString).draw(at:CGPoint(x:rect.minX+18,y:rect.minY+13),withAttributes:[.font:hf,.foregroundColor:UIColor.white])
+        ("(p.lens)  ·  (info(p))" as NSString).draw(at:CGPoint(x:rect.minX+20,y:rect.minY+49),withAttributes:[.font:sf,.foregroundColor:UIColor.white.withAlphaComponent(0.8)])
+    }
+
+    private static func drawFujifilm(_ context: UIGraphicsImageRendererContext, _ size: CGSize, _ p: CameraPreset) {
+        let h=86.0
+        UIColor.black.withAlphaComponent(0.60).setFill()
+        context.fill(CGRect(x:0,y:size.height-h,width:size.width,height:h))
+        let widths:[CGFloat]=[80,30,60,24,110]
+        var x:CGFloat=0
+        let colors:[UIColor]=[
+            UIColor(red:0.20,green:0.72,blue:0.48,alpha:1),
+            UIColor.white.withAlphaComponent(0.9),
+            UIColor(red:0.20,green:0.55,blue:0.95,alpha:1),
+            UIColor.white.withAlphaComponent(0.9),
+            UIColor(red:0.90,green:0.20,blue:0.12,alpha:1)
+        ]
+        for (i,w) in widths.enumerated() {
+            colors[i].setFill(); context.fill(CGRect(x:x,y:size.height-h,width:w,height:6)); x += w+12
+        }
+        let (_,sf)=fonts(size)
+        ("富士胶片  (p.exifModel)  ·  (p.lens)  ·  (info(p))" as NSString).draw(
+            at:CGPoint(x:30,y:size.height-h+30),withAttributes:[.font:sf,.foregroundColor:UIColor.white])
+    }
+
+    private static func drawRicoh(_ context: UIGraphicsImageRendererContext, _ size: CGSize, _ p: CameraPreset) {
+        let box=CGRect(x:size.width-430,y:30,width:400,height:112)
+        UIColor.black.withAlphaComponent(0.60).setFill()
+        context.fill(box)
+        UIColor(red:0.90,green:0.20,blue:0.12,alpha:1).setFill()
+        context.fill(CGRect(x:box.maxX-8,y:box.minY,width:8,height:box.height))
+        let (_,sf)=fonts(size)
+        let hf=UIFont.systemFont(ofSize:max(24,size.width/66),weight:.bold)
+        ("理光  (p.exifModel)" as NSString).draw(at:CGPoint(x:box.minX+20,y:box.minY+18),
+            withAttributes:[.font:hf,.foregroundColor:UIColor.white])
+        ("街拍  ·  (p.lens)  ·  (info(p))" as NSString).draw(at:CGPoint(x:box.minX+22,y:box.minY+60),
+            withAttributes:[.font:sf,.foregroundColor:UIColor.white.withAlphaComponent(0.82)])
+    }
+
+    private static func drawGeneric(_ context: UIGraphicsImageRendererContext, _ size: CGSize, _ p: CameraPreset) {
+        let h=86.0
+        UIColor.black.withAlphaComponent(0.65).setFill()
+        context.fill(CGRect(x:0,y:size.height-h,width:size.width,height:h))
+        let (_,sf)=fonts(size)
+        ("(p.chineseBrand)  (p.chineseModel)  ·  (p.lens)  ·  (info(p))" as NSString).draw(
+            at:CGPoint(x:28,y:size.height-h+28),withAttributes:[.font:sf,.foregroundColor:UIColor.white.withAlphaComponent(0.88)])
     }
 }
 
@@ -1059,6 +1330,28 @@ enum PhotoSaver {
             request.addResource(with: .photo, fileURL: stillURL, options: nil)
             request.addResource(with: .pairedVideo, fileURL: movieURL, options: nil)
         }
+    }
+}
+
+func brandChineseName(_ brand: String) -> String {
+    switch brand.uppercased() {
+    case "LEICA": return "徕卡"
+    case "HASSELBLAD": return "哈苏"
+    case "ZEISS": return "蔡司"
+    case "VIVO": return "维沃"
+    case "XIAOMI": return "小米"
+    case "HUAWEI": return "华为"
+    case "OPPO": return "欧珀"
+    case "GOOGLE": return "谷歌"
+    case "APPLE": return "苹果"
+    case "SONY": return "索尼"
+    case "CANON": return "佳能"
+    case "NIKON": return "尼康"
+    case "FUJIFILM": return "富士胶片"
+    case "RICOH": return "理光"
+    case "PANASONIC": return "松下"
+    case "SIGMA": return "适马"
+    default: return brand
     }
 }
 
@@ -1156,7 +1449,7 @@ struct ContentView: View {
     private var topBar: some View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("GCam 风格相机")
+                Text("风格相机")
                     .font(.system(size: 15, weight: .bold))
                     .tracking(1.3)
                 Text("\(preset.brand) · \(preset.model)")
@@ -1170,7 +1463,7 @@ struct ContentView: View {
                 showPresetPicker = true
             } label: {
                 HStack(spacing: 5) {
-                    Text(preset.brand)
+                    Text(preset.chineseBrand)
                     Image(systemName: "chevron.down")
                 }
                 .font(.system(size: 12, weight: .semibold))
@@ -1206,7 +1499,7 @@ struct ContentView: View {
                                 preset = item
                             }
                         } label: {
-                            Text(brand)
+                            Text(brandChineseName(brand))
                                 .font(.system(size: 11, weight: .bold))
                                 .padding(.horizontal, 11)
                                 .padding(.vertical, 8)
@@ -1271,7 +1564,7 @@ struct ContentView: View {
             HStack(spacing: 7) {
                 Image(systemName: captureMode == .proRAW ? "camera.aperture" : "camera")
                     .font(.system(size: 10, weight: .bold))
-                Text(captureMode == .proRAW ? "RAW 保留原始 + 风格 JPEG" : "实时风格 · 自动水印")
+                Text(captureMode == .proRAW ? "原始格式保留 + 风格照片" : "实时风格 · 自动水印")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.white.opacity(0.78))
 
@@ -1300,7 +1593,7 @@ struct ContentView: View {
                         Circle()
                             .fill(captureMode == mode ? Color.black : Color.white.opacity(0.55))
                             .frame(width: 5, height: 5)
-                        Text(mode.rawValue)
+                        Text(mode.title)
                             .font(.system(size: 11, weight: .bold))
                     }
                     .padding(.horizontal, 11)
@@ -1412,13 +1705,13 @@ struct ContentView: View {
         NavigationStack {
             Form {
                 Section("EXIF 机型") {
-                    TextField("Make（厂商）", text: $metadata.make)
-                    TextField("Model（机型）", text: $metadata.model)
-                    TextField("Lens（镜头）", text: $metadata.lens)
-                    TextField("Artist", text: $metadata.artist)
-                    TextField("Copyright", text: $metadata.copyright)
-                    TextField("DateTimeOriginal", text: $metadata.dateOriginal)
-                    Toggle("移除 GPS", isOn: $metadata.stripGPS)
+                    TextField("厂商", text: $metadata.make)
+                    TextField("机型", text: $metadata.model)
+                    TextField("镜头", text: $metadata.lens)
+                    TextField("作者", text: $metadata.artist)
+                    TextField("版权信息", text: $metadata.copyright)
+                    TextField("原始拍摄时间", text: $metadata.dateOriginal)
+                    Toggle("移除位置", isOn: $metadata.stripGPS)
                 }
 
                 Section("快速写入当前预设") {
@@ -1430,12 +1723,12 @@ struct ContentView: View {
                 }
 
                 Section("说明") {
-                    Text("导出的 JPEG 会保留原照片可读取的元数据，并覆盖 Make / Model / 镜头 / 焦段 / 光圈 / ISO 等项目。ProRAW 原文件不修改，避免破坏原始 RAW 数据。")
+                    Text("导出的照片会保留可读取的原始信息，并可覆盖厂商、机型、镜头、焦段、光圈、感光度等项目。原始照片文件不会被修改。")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
             }
-            .navigationTitle("EXIF 编辑")
+            .navigationTitle("照片信息")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("完成") { showMetadata = false }
