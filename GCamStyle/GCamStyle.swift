@@ -21,8 +21,9 @@ enum CaptureMode: String, CaseIterable, Identifiable {
 }
 
 struct MetadataDraft: Hashable {
-    var make = "Apple"
-    var model = "iPhone"
+    // Empty values mean "use the selected preset" during export.
+    var make = ""
+    var model = ""
     var lens = ""
     var artist = ""
     var copyright = ""
