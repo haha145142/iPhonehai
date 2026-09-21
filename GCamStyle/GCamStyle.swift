@@ -126,6 +126,65 @@ struct MetadataDraft: Hashable {
     var stripGPS = false
 }
 
+enum CustomWatermarkLayout: String, CaseIterable, Identifiable {
+    case bottom
+    case verticalLeft
+    case verticalRight
+    case topRight
+    case minimal
+    case split
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .bottom: return "底部参数条"
+        case .verticalLeft: return "左侧竖排"
+        case .verticalRight: return "右侧竖排"
+        case .topRight: return "右上角"
+        case .minimal: return "极简"
+        case .split: return "分栏"
+        }
+    }
+}
+
+enum CustomFrameStyle: String, CaseIterable, Identifiable {
+    case none
+    case thin
+    case bold
+    case film
+    case rounded
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .none: return "无相框"
+        case .thin: return "细线相框"
+        case .bold: return "粗线相框"
+        case .film: return "电影边框"
+        case .rounded: return "圆角相框"
+        }
+    }
+}
+
+struct CustomWatermarkConfig: Hashable {
+    var title = ""
+    var subtitle = ""
+    var showParameters = true
+    var usePresetBrand = true
+    var layout: CustomWatermarkLayout = .bottom
+    var opacity: Double = 0.72
+    var frame: CustomFrameStyle = .none
+    var frameWidth: Double = 8
+    var customFooter = ""
+
+    var isCustomized: Bool {
+        !title.isEmpty || !subtitle.isEmpty || !customFooter.isEmpty || !usePresetBrand ||
+        layout != .bottom || frame != .none || showParameters == false
+    }
+}
+
 struct CameraPreset: Identifiable, Hashable {
     let id: String
     let brand: String
@@ -802,7 +861,8 @@ final class CameraEngine: NSObject, ObservableObject {
             preset: preset,
             mode: mode,
             watermark: watermark,
-            metadata: metadata
+            metadata: metadata,
+            watermarkConfig: watermarkConfig
         )
 
         delegates[settings.uniqueID] = delegate
@@ -923,7 +983,8 @@ final class CameraEngine: NSObject, ObservableObject {
         movieURL: URL,
         preset: CameraPreset,
         watermark: Bool,
-        metadata: MetadataDraft
+        metadata: MetadataDraft,
+        watermarkConfig: CustomWatermarkConfig
     ) {
         let stillURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("GCamStyle-Live-\(UUID().uuidString).jpg")
@@ -947,6 +1008,7 @@ final class CaptureProcessorDelegate: NSObject, AVCapturePhotoCaptureDelegate {
     let mode: CaptureMode
     let watermark: Bool
     let metadata: MetadataDraft
+    let watermarkConfig: CustomWatermarkConfig
 
     private var processedData: Data?
     private var rawData: Data?
@@ -958,7 +1020,8 @@ final class CaptureProcessorDelegate: NSObject, AVCapturePhotoCaptureDelegate {
         preset: CameraPreset,
         mode: CaptureMode,
         watermark: Bool,
-        metadata: MetadataDraft
+        metadata: MetadataDraft,
+        watermarkConfig: CustomWatermarkConfig
     ) {
         self.owner = owner
         self.settingsID = settingsID
@@ -966,6 +1029,7 @@ final class CaptureProcessorDelegate: NSObject, AVCapturePhotoCaptureDelegate {
         self.mode = mode
         self.watermark = watermark
         self.metadata = metadata
+        self.watermarkConfig = watermarkConfig
     }
 
     func photoOutput(
@@ -1013,14 +1077,16 @@ final class CaptureProcessorDelegate: NSObject, AVCapturePhotoCaptureDelegate {
                         movieURL: movieURL,
                         preset: self.preset,
                         watermark: self.watermark,
-                        metadata: self.metadata
+                        metadata: self.metadata,
+                        watermarkConfig: self.watermarkConfig
                     )
                 } else {
                     owner.showProcessedStill(
                         data: processedData,
                         preset: self.preset,
                         watermark: self.watermark,
-                        metadata: self.metadata
+                        metadata: self.metadata,
+                        watermarkConfig: self.watermarkConfig
                     )
                 }
             }
@@ -1199,7 +1265,8 @@ enum ExportService {
         sourceData: Data,
         preset: CameraPreset,
         watermark: Bool,
-        metadata: MetadataDraft
+        metadata: MetadataDraft,
+        watermarkConfig: CustomWatermarkConfig = CustomWatermarkConfig()
     ) throws -> URL {
         guard
             let source = CGImageSourceCreateWithData(sourceData as CFData, nil),
@@ -1227,6 +1294,7 @@ enum ExportService {
             preset: preset,
             metadata: metadata,
             watermark: watermark,
+            watermarkConfig: watermarkConfig,
             sourceProperties: sourceProperties
         )
     }
@@ -1236,6 +1304,7 @@ enum ExportService {
         preset: CameraPreset,
         metadata: MetadataDraft,
         watermark: Bool,
+        watermarkConfig: CustomWatermarkConfig,
         sourceProperties: [String: Any]
     ) throws -> URL {
         var properties = sourceProperties
@@ -1263,9 +1332,12 @@ enum ExportService {
             properties.removeValue(forKey: kCGImagePropertyGPSDictionary as String)
         }
 
-        let finalImage = watermark
-            ? WatermarkRenderer.draw(on: cgImage, preset: preset).cgImage!
-            : cgImage
+        let watermarked = watermark
+            ? WatermarkRenderer.draw(on: cgImage, preset: preset, config: watermarkConfig)
+            : UIImage(cgImage: cgImage)
+        let finalImage: CGImage = watermarked.cgImage ?? cgImage
+        let framedImage = FrameRenderer.apply(to: finalImage, style: watermarkConfig.frame, width: CGFloat(watermarkConfig.frameWidth))
+        let exportImage = framedImage
 
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("GCamStyle-\(UUID().uuidString).jpg")
@@ -1281,7 +1353,7 @@ enum ExportService {
             ])
         }
 
-        CGImageDestinationAddImage(destination, finalImage, properties as CFDictionary)
+        CGImageDestinationAddImage(destination, exportImage, properties as CFDictionary)
 
         guard CGImageDestinationFinalize(destination) else {
             throw NSError(domain: "GCamStyle", code: 4, userInfo: [
@@ -1296,7 +1368,7 @@ enum ExportService {
 // MARK: - 水印
 
 enum WatermarkRenderer {
-    static func draw(on cgImage: CGImage, preset: CameraPreset) -> UIImage {
+    static func draw(on cgImage: CGImage, preset: CameraPreset, config: CustomWatermarkConfig = CustomWatermarkConfig()) -> UIImage {
         let size = CGSize(width: cgImage.width, height: cgImage.height)
         let renderer = UIGraphicsImageRenderer(size: size)
 
@@ -1307,39 +1379,49 @@ enum WatermarkRenderer {
             let infoFont = UIFont.monospacedSystemFont(ofSize: max(12, size.width / 94), weight: .medium)
             let accent = preset.watermarkAccent
 
-            switch preset.watermarkLayout {
+            let titleText = config.title.isEmpty ? "\(preset.brand)  \(preset.model)" : config.title
+            let subtitleText = config.subtitle.isEmpty
+                ? "\(preset.lens)   \(preset.focal)   \(preset.aperture)   \(preset.shutter)   \(preset.iso)"
+                : config.subtitle
+            let footerText = config.customFooter.isEmpty ? subtitleText : config.customFooter
+
+            let opacity = CGFloat(min(0.95, max(0.15, config.opacity)))
+            let selectedLayout: CustomWatermarkLayout
+            if config.isCustomized {
+                selectedLayout = config.layout
+            } else {
+                switch preset.watermarkLayout {
+                case .verticalLeft: selectedLayout = .verticalLeft
+                case .verticalRight: selectedLayout = .verticalRight
+                case .bottomBand: selectedLayout = .bottom
+                case .bottomMinimal: selectedLayout = .minimal
+                case .topRight: selectedLayout = .topRight
+                case .split: selectedLayout = .split
+                }
+            }
+
+            if config.usePresetBrand && config.title.isEmpty {
+                // 使用预设品牌与机型。
+            }
+
+            switch selectedLayout {
             case .verticalLeft:
-                drawVertical(ctx: ctx.cgContext, size: size, preset: preset, x: 18, fromLeft: true, titleFont: titleFont, infoFont: infoFont, accent: accent)
-
+                drawCustomVertical(ctx: ctx.cgContext, size: size, title: titleText, subtitle: footerText, x: 18, fromLeft: true, titleFont: titleFont, infoFont: infoFont, accent: accent, opacity: opacity)
             case .verticalRight:
-                drawVertical(ctx: ctx.cgContext, size: size, preset: preset, x: size.width - 18, fromLeft: false, titleFont: titleFont, infoFont: infoFont, accent: accent)
-
-            case .bottomBand:
-                let h = max(104, size.height * 0.095)
-                let band = CGRect(x: 0, y: size.height - h, width: size.width, height: h)
-                UIColor.black.withAlphaComponent(0.74).setFill()
-                ctx.cgContext.fill(band)
-                accent.setFill()
-                ctx.cgContext.fill(CGRect(x: 0, y: band.minY, width: size.width, height: 4))
-                drawBottomText(preset: preset, x: max(24, size.width * 0.028), y: band.minY + 18, titleFont: titleFont, infoFont: infoFont)
-
-            case .bottomMinimal:
-                let x = max(24, size.width * 0.028)
-                let y = size.height - max(84, size.height * 0.075)
-                UIColor.black.withAlphaComponent(0.60).setFill()
-                ctx.cgContext.fill(CGRect(x: 0, y: y - 12, width: size.width, height: size.height - y + 12))
-                drawBottomText(preset: preset, x: x, y: y, titleFont: titleFont, infoFont: infoFont)
-
+                drawCustomVertical(ctx: ctx.cgContext, size: size, title: titleText, subtitle: footerText, x: size.width - 18, fromLeft: false, titleFont: titleFont, infoFont: infoFont, accent: accent, opacity: opacity)
+            case .bottom:
+                drawCustomBottom(ctx: ctx.cgContext, size: size, title: titleText, subtitle: footerText, titleFont: titleFont, infoFont: infoFont, accent: accent, opacity: opacity, band: true)
+            case .minimal:
+                drawCustomBottom(ctx: ctx.cgContext, size: size, title: titleText, subtitle: footerText, titleFont: titleFont, infoFont: infoFont, accent: accent, opacity: opacity, band: false)
             case .topRight:
-                let title = "\(preset.brand)  \(preset.model)" as NSString
-                let info = "\(preset.focal) · \(preset.aperture) · \(preset.shutter) · \(preset.iso)" as NSString
-                let x = size.width - min(size.width * 0.52, 620)
+                let x = size.width - min(size.width * 0.55, 650)
                 let y = max(22, size.height * 0.028)
-                UIColor.black.withAlphaComponent(0.52).setFill()
-                ctx.cgContext.fill(CGRect(x: x - 18, y: y - 12, width: min(size.width * 0.52, 620), height: 96))
-                title.draw(at: CGPoint(x: x, y: y), withAttributes: [.font: titleFont, .foregroundColor: UIColor.white])
-                info.draw(at: CGPoint(x: x, y: y + titleFont.lineHeight + 8), withAttributes: [.font: infoFont, .foregroundColor: UIColor.white.withAlphaComponent(0.86)])
-
+                UIColor.black.withAlphaComponent(opacity * 0.80).setFill()
+                ctx.cgContext.fill(CGRect(x: x - 18, y: y - 12, width: min(size.width * 0.55, 650), height: 104))
+                (titleText as NSString).draw(at: CGPoint(x: x, y: y), withAttributes: [.font: titleFont, .foregroundColor: UIColor.white])
+                if config.showParameters || !config.subtitle.isEmpty || !config.customFooter.isEmpty {
+                    (footerText as NSString).draw(at: CGPoint(x: x, y: y + titleFont.lineHeight + 8), withAttributes: [.font: infoFont, .foregroundColor: UIColor.white.withAlphaComponent(0.88)])
+                }
             case .split:
                 let y = size.height - max(92, size.height * 0.082)
                 let line = UIBezierPath()
@@ -1348,9 +1430,74 @@ enum WatermarkRenderer {
                 accent.setStroke()
                 line.lineWidth = 3
                 line.stroke()
-                drawBottomText(preset: preset, x: 24, y: y, titleFont: titleFont, infoFont: infoFont)
+                (titleText as NSString).draw(at: CGPoint(x: 24, y: y), withAttributes: [.font: titleFont, .foregroundColor: UIColor.white])
+                if config.showParameters || !config.subtitle.isEmpty || !config.customFooter.isEmpty {
+                    (footerText as NSString).draw(at: CGPoint(x: 24, y: y + titleFont.lineHeight + 8), withAttributes: [.font: infoFont, .foregroundColor: UIColor.white.withAlphaComponent(0.86)])
+                }
             }
         }
+    }
+
+    private static func drawCustomBottom(
+        ctx: CGContext,
+        size: CGSize,
+        title: String,
+        subtitle: String,
+        titleFont: UIFont,
+        infoFont: UIFont,
+        accent: UIColor,
+        opacity: CGFloat,
+        band: Bool
+    ) {
+        let h = band ? max(106, size.height * 0.095) : max(84, size.height * 0.075)
+        let y = size.height - h
+        if band {
+            UIColor.black.withAlphaComponent(opacity).setFill()
+            ctx.fill(CGRect(x: 0, y: y, width: size.width, height: h))
+        } else {
+            UIColor.black.withAlphaComponent(opacity * 0.78).setFill()
+            ctx.fill(CGRect(x: 0, y: y - 12, width: size.width, height: h + 12))
+        }
+        accent.setFill()
+        ctx.fill(CGRect(x: 0, y: y, width: size.width, height: band ? 4 : 2))
+        (title as NSString).draw(at: CGPoint(x: max(24, size.width * 0.028), y: y + 16), withAttributes: [.font: titleFont, .foregroundColor: UIColor.white])
+        (subtitle as NSString).draw(at: CGPoint(x: max(24, size.width * 0.028), y: y + 18 + titleFont.lineHeight), withAttributes: [.font: infoFont, .foregroundColor: UIColor.white.withAlphaComponent(0.86)])
+    }
+
+    private static func drawCustomVertical(
+        ctx: CGContext,
+        size: CGSize,
+        title: String,
+        subtitle: String,
+        x: CGFloat,
+        fromLeft: Bool,
+        titleFont: UIFont,
+        infoFont: UIFont,
+        accent: UIColor,
+        opacity: CGFloat
+    ) {
+        let width = max(220, size.height * 0.34)
+        let y = size.height * 0.10
+        ctx.saveGState()
+
+        if fromLeft {
+            ctx.translateBy(x: x, y: y + width)
+            ctx.rotate(by: -.pi / 2)
+        } else {
+            ctx.translateBy(x: x, y: y)
+            ctx.rotate(by: .pi / 2)
+        }
+
+        UIColor.black.withAlphaComponent(opacity * 0.72).setFill()
+        ctx.fill(CGRect(x: -14, y: 0, width: width + 24, height: 88))
+
+        accent.setFill()
+        ctx.fill(CGRect(x: -8, y: 0, width: 5, height: width))
+
+        (title as NSString).draw(at: CGPoint(x: 10, y: 4), withAttributes: [.font: titleFont, .foregroundColor: UIColor.white])
+        (subtitle as NSString).draw(at: CGPoint(x: 10, y: 8 + titleFont.lineHeight), withAttributes: [.font: infoFont, .foregroundColor: UIColor.white.withAlphaComponent(0.86)])
+
+        ctx.restoreGState()
     }
 
     private static func drawVertical(
@@ -1399,6 +1546,64 @@ enum WatermarkRenderer {
 
         title.draw(at: CGPoint(x: x, y: y), withAttributes: [.font: titleFont, .foregroundColor: UIColor.white])
         info.draw(at: CGPoint(x: x, y: y + titleFont.lineHeight + 8), withAttributes: [.font: infoFont, .foregroundColor: UIColor.white.withAlphaComponent(0.86)])
+    }
+}
+
+enum FrameRenderer {
+    static func apply(to image: CGImage, style: CustomFrameStyle, width: CGFloat) -> CGImage {
+        guard style != .none else { return image }
+
+        let size = CGSize(width: image.width, height: image.height)
+        let margin: CGFloat
+
+        switch style {
+        case .none: margin = 0
+        case .thin: margin = max(8, width)
+        case .bold: margin = max(18, width * 1.8)
+        case .film: margin = max(24, width * 2.4)
+        case .rounded: margin = max(18, width * 1.7)
+        }
+
+        let output = CGSize(width: size.width + margin * 2, height: size.height + margin * 2)
+        let renderer = UIGraphicsImageRenderer(size: output)
+
+        return renderer.image { ctx in
+            UIColor.black.setFill()
+            ctx.fill(CGRect(origin: .zero, size: output))
+
+            let photoRect = CGRect(x: margin, y: margin, width: size.width, height: size.height)
+
+            if style == .rounded {
+                let path = UIBezierPath(roundedRect: photoRect, cornerRadius: min(48, margin * 1.5))
+                path.addClip()
+            }
+
+            UIImage(cgImage: image).draw(in: photoRect)
+
+            let borderWidth = max(2, width / 2)
+            if style == .film {
+                UIColor.white.withAlphaComponent(0.90).setStroke()
+                let border = UIBezierPath(rect: photoRect.insetBy(dx: borderWidth / 2, dy: borderWidth / 2))
+                border.lineWidth = borderWidth
+                border.stroke()
+
+                let hole = max(8, margin * 0.25)
+                UIColor.white.withAlphaComponent(0.85).setFill()
+                for side in 0..<2 {
+                    let x = side == 0 ? margin * 0.22 : output.width - margin * 0.22
+                    var y: CGFloat = margin * 0.18
+                    while y < output.height - margin * 0.18 {
+                        ctx.fill(CGRect(x: x - hole / 2, y: y, width: hole, height: hole * 0.65))
+                        y += hole * 1.65
+                    }
+                }
+            } else {
+                UIColor.white.withAlphaComponent(0.94).setStroke()
+                let path = UIBezierPath(rect: photoRect.insetBy(dx: borderWidth / 2, dy: borderWidth / 2))
+                path.lineWidth = borderWidth
+                path.stroke()
+            }
+        }.cgImage ?? image
     }
 }
 
@@ -1455,6 +1660,7 @@ struct ContentView: View {
     @State private var showAGCImporter = false
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var profile: GCamProfile = .natural
+    @State private var watermarkConfig = CustomWatermarkConfig()
 
     private var effectivePreset: CameraPreset { profile.applying(to: preset) }
 
@@ -1522,7 +1728,7 @@ struct ContentView: View {
                 }
                 profile = .natural
             } catch {
-                camera.errorMessage = "AGC 导入失败：\(error.localizedDescription)"
+                camera.errorMessage = "安卓配置导入失败：\(error.localizedDescription)"
             }
         }
         .onChange(of: selectedPhoto) { _, item in
@@ -1530,7 +1736,7 @@ struct ContentView: View {
             Task {
                 do {
                     guard let data = try await item.loadTransferable(type: Data.self) else { return }
-                    camera.importPhoto(data, preset: preset, watermark: watermark, metadata: metadata)
+                    camera.importPhoto(data, preset: effectivePreset, watermark: watermark, metadata: metadata, watermarkConfig: watermarkConfig)
                 } catch {
                     camera.errorMessage = "无法读取照片：\(error.localizedDescription)"
                 }
@@ -1680,7 +1886,8 @@ struct ContentView: View {
                         preset: effectivePreset,
                         mode: mode,
                         watermark: watermark,
-                        metadata: metadata
+                        metadata: metadata,
+                        watermarkConfig: watermarkConfig
                     )
                 } label: {
                     ZStack {
@@ -1869,6 +2076,40 @@ struct ContentView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                Section("自定义水印") {
+                    TextField("水印主标题", text: $watermarkConfig.title)
+                    TextField("水印副标题", text: $watermarkConfig.subtitle)
+                    Toggle("显示拍摄参数", isOn: $watermarkConfig.showParameters)
+                    Toggle("使用当前机型名称", isOn: $watermarkConfig.usePresetBrand)
+
+                    Picker("水印版式", selection: $watermarkConfig.layout) {
+                        ForEach(CustomWatermarkLayout.allCases) { item in
+                            Text(item.title).tag(item)
+                        }
+                    }
+
+                    Picker("相框样式", selection: $watermarkConfig.frame) {
+                        ForEach(CustomFrameStyle.allCases) { item in
+                            Text(item.title).tag(item)
+                        }
+                    }
+
+                    Stepper(
+                        "相框宽度 (Int(watermarkConfig.frameWidth))",
+                        value: $watermarkConfig.frameWidth,
+                        in: 2...40,
+                        step: 2
+                    )
+
+                    Slider(value: $watermarkConfig.opacity, in: 0.15...0.95) {
+                        Text("水印透明度")
+                    }
+
+                    Button("恢复当前预设水印") {
+                        watermarkConfig = CustomWatermarkConfig()
+                    }
+                }
+
                 Section("EXIF") {
                     TextField("厂商", text: $metadata.make)
                     TextField("机型", text: $metadata.model)
@@ -1879,9 +2120,14 @@ struct ContentView: View {
                     Toggle("移除 GPS", isOn: $metadata.stripGPS)
 
                     Button("使用当前预设信息") {
-                        metadata.make = preset.exifMake
-                        metadata.model = preset.exifModel
-                        metadata.lens = preset.lens
+                        metadata.make = effectivePreset.exifMake
+                        metadata.model = effectivePreset.exifModel
+                        metadata.lens = effectivePreset.lens
+                    }
+
+                    Button("把机型写入水印标题") {
+                        watermarkConfig.title = metadata.model.isEmpty ? effectivePreset.exifModel : metadata.model
+                        watermarkConfig.usePresetBrand = false
                     }
                 }
 
