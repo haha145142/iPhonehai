@@ -173,9 +173,9 @@ enum PresetLibrary {
                         sharpness: min(1.0, max(0.0, b.14 + v.5)),
                         warmth: b.15,
                         tint: b.16,
-                        channelBias: b.17,
-                        exifMake: b.18,
-                        exifModel: b.19
+                        channelBias: 0,
+                        exifMake: b.17,
+                        exifModel: b.18
                     )
                 )
             }
@@ -889,7 +889,6 @@ enum ExportService {
         }
 
         return url
-    }
     }
 }
 
