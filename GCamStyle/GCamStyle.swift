@@ -276,33 +276,89 @@ enum PresetLibrary {
     }
 }
 
-// MARK: - AGC 配置导入
+// MARK: - 安卓谷歌相机配置兼容层
+//
+// 真实 AGC 文件是 Android SharedPreferences 风格的 XML。
+// 它不是简单的“几个滤镜参数”，而是包含大量 libpatch、色彩、降噪、
+// HDR、帧数、LUT、Profile 等配置。iPhone 不能直接执行安卓 .so，
+// 因此这里做“配置读取 → iOS 成像参数映射”，并逐个恢复 AGC Profile。
 
 struct AGCConfig {
-    var values: [String:String] = [:]
-    var sets: [String:[String]] = [:]
+    var values: [String: String] = [:]
+    var sets: [String: [String]] = [:]
 
     func string(_ key: String) -> String? {
-        values[key]
+        guard let value = values[key] else { return nil }
+        let cleaned = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return cleaned.isEmpty ? nil : cleaned
     }
 
     func number(_ key: String) -> Double? {
-        guard let raw = values[key] else { return nil }
-        return Double(raw.trimmingCharacters(in: .whitespacesAndNewlines))
+        guard let raw = string(key) else { return nil }
+        return Double(raw.replacingOccurrences(of: ",", with: "."))
     }
 
     func int(_ key: String) -> Int? {
-        guard let raw = values[key] else { return nil }
-        return Int(raw.trimmingCharacters(in: .whitespacesAndNewlines))
+        guard let raw = string(key) else { return nil }
+        return Int(raw)
     }
 
     func bool(_ key: String) -> Bool? {
-        guard let raw = values[key] else { return nil }
-        switch raw.lowercased() {
-        case "1","true","on","yes": return true
-        case "0","false","off","no": return false
+        guard let raw = string(key)?.lowercased() else { return nil }
+        switch raw {
+        case "1", "true", "on", "yes": return true
+        case "0", "false", "off", "no": return false
         default: return nil
         }
+    }
+
+    func profileValue(_ key: String, profile: Int, cameraIndex: Int = 0) -> String? {
+        let exact = "\(key)_p\(profile)_\(cameraIndex)"
+        if let value = string(exact) { return value }
+
+        let noCameraSuffix = "\(key)_p\(profile)"
+        return string(noCameraSuffix)
+    }
+
+    func profileNumber(_ key: String, profile: Int, cameraIndex: Int = 0) -> Double? {
+        guard let value = profileValue(key, profile: profile, cameraIndex: cameraIndex) else { return nil }
+        return Double(value)
+    }
+
+    func profileInt(_ key: String, profile: Int, cameraIndex: Int = 0) -> Int? {
+        guard let value = profileValue(key, profile: profile, cameraIndex: cameraIndex) else { return nil }
+        return Int(value)
+    }
+
+    func profileIndices() -> [Int] {
+        var ids = Set<Int>()
+
+        if let count = int("pref_patch_profile_count_key"), count > 0 {
+            ids.formUnion(0..<count)
+        }
+
+        let pattern = #"^lib_profile_title_key_p(\\d+)_0$"#
+        if let regex = try? NSRegularExpression(pattern: pattern) {
+            for key in values.keys {
+                let ns = key as NSString
+                let range = NSRange(location: 0, length: ns.length)
+                if let match = regex.firstMatch(in: key, range: range),
+                   let numberRange = Range(match.range(at: 1), in: key),
+                   let id = Int(key[numberRange]) {
+                    ids.insert(id)
+                }
+            }
+        }
+
+        return ids.sorted()
+    }
+
+    func profileTitle(_ index: Int) -> String {
+        profileValue("lib_profile_title_key", profile: index) ?? "配置 \(index + 1)"
+    }
+
+    func profileTitles() -> [String] {
+        profileIndices().map(profileTitle)
     }
 }
 
@@ -317,28 +373,46 @@ final class AGCXMLParser: NSObject, XMLParserDelegate {
     func parse(_ data: Data) throws -> AGCConfig {
         let parser = XMLParser(data: data)
         parser.delegate = self
+
         guard parser.parse() else {
-            throw NSError(domain: "GCamStyleAGC", code: 1, userInfo: [
-                NSLocalizedDescriptionKey: parser.parserError?.localizedDescription ?? "安卓配置文件格式无法识别；请使用与对应版本相符的配置文件。"
-            ])
+            throw NSError(
+                domain: "GCamStyleAGC",
+                code: 1,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        parser.parserError?.localizedDescription ??
+                        "安卓配置文件无法读取，请确认这是有效的 AGC 配置文件。"
+                ]
+            )
         }
+
         return config
     }
 
-    func parser(_ parser: XMLParser, didStartElement elementName: String,
-                namespaceURI: String?, qualifiedName qName: String?,
-                attributes attributeDict: [String : String] = [:]) {
-        if elementName == "string" || elementName == "int" || elementName == "boolean" {
+    func parser(
+        _ parser: XMLParser,
+        didStartElement elementName: String,
+        namespaceURI: String?,
+        qualifiedName qName: String?,
+        attributes attributeDict: [String : String] = [:]
+    ) {
+        switch elementName {
+        case "string", "int", "long", "float", "double", "boolean":
             currentName = attributeDict["name"]
             currentText = ""
+
             if let value = attributeDict["value"], let currentName {
                 config.values[currentName] = value
                 self.currentName = nil
             }
-        } else if elementName == "set" {
+
+        case "set":
             currentSetName = attributeDict["name"]
             currentSetValues = []
             capturingSet = true
+
+        default:
+            break
         }
     }
 
@@ -346,89 +420,193 @@ final class AGCXMLParser: NSObject, XMLParserDelegate {
         currentText += string
     }
 
-    func parser(_ parser: XMLParser, didEndElement elementName: String,
-                namespaceURI: String?, qualifiedName qName: String?) {
-        if elementName == "string", let name = currentName {
-            config.values[name] = currentText.trimmingCharacters(in: .whitespacesAndNewlines)
-            currentName = nil
-            currentText = ""
-        } else if elementName == "string", capturingSet {
-            let value = currentText.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !value.isEmpty { currentSetValues.append(value) }
-            currentText = ""
-        } else if elementName == "set" {
+    func parser(
+        _ parser: XMLParser,
+        didEndElement elementName: String,
+        namespaceURI: String?,
+        qualifiedName qName: String?
+    ) {
+        switch elementName {
+        case "string":
+            if let name = currentName {
+                config.values[name] = currentText.trimmingCharacters(in: .whitespacesAndNewlines)
+                currentName = nil
+                currentText = ""
+            } else if capturingSet {
+                let value = currentText.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !value.isEmpty {
+                    currentSetValues.append(value)
+                }
+                currentText = ""
+            }
+
+        case "int", "long", "float", "double", "boolean":
+            if let name = currentName {
+                config.values[name] = currentText.trimmingCharacters(in: .whitespacesAndNewlines)
+                currentName = nil
+                currentText = ""
+            }
+
+        case "set":
             if let name = currentSetName {
                 config.sets[name] = currentSetValues
             }
             currentSetName = nil
             currentSetValues = []
             capturingSet = false
+
+        default:
+            break
         }
     }
 }
 
 enum AGCMapper {
-    static func makePreset(from config: AGCConfig, fileName: String) -> CameraPreset {
-        let brand = config.string("info_brand_key") ?? config.string("info_manuf_key") ?? "导入配置"
-        let model = config.string("info_model_key") ?? "AGC 配置"
-        let lens = config.string("pref_lens_title_key_2") ?? config.string("pref_lens_title_key_4") ?? "主摄"
+    private static func clamp(_ value: Double, _ low: Double, _ high: Double) -> Double {
+        min(high, max(low, value))
+    }
 
-        let saturationGPU = config.number("lib_gpu_saturation_key") ?? 1.0
-        let vibrance = config.number("lib_gpu_vibrance_key") ?? 1.0
-        let contrastGPU = config.number("lib_gpu_contrast_key") ?? 1.0
-        let brightnessGPU = config.number("lib_gpu_brightness_key") ?? 0.0
-        let sharpness = config.number("lib_sharp_gain_key") ?? config.number("lib_sharp_gain_micro_key") ?? 0.25
-        let hue = config.number("lib_gpu_hue_key") ?? 0.0
-        let lutIntensity = config.number("lib_lut_intensity_key") ?? 1.0
+    private static func finite(_ value: Double, fallback: Double) -> Double {
+        value.isFinite ? value : fallback
+    }
 
-        let sat = min(1.35, max(0.65, saturationGPU * (0.92 + vibrance * 0.08)))
-        let con = min(1.35, max(0.75, contrastGPU))
-        let exposure = min(1.2, max(-1.2, brightnessGPU * 0.02))
-        let warm = min(12, max(-12, hue / 30.0))
-        let sh = min(1.0, max(0.0, 0.20 + lutIntensity * 0.10))
-        let hi = min(1.0, max(0.0, 0.70 - lutIntensity * 0.05))
-        let focal = config.string("pref_lens_title_key_2") == "Tele" ? "50mm" : "28mm"
-        let aperture = "F1.8"
+    static func makePresets(from config: AGCConfig, fileName: String) -> [CameraPreset] {
+        let brand = config.string("info_brand_key") ?? config.string("info_manuf_key") ?? "安卓配置"
+        let model = config.string("info_model_key") ?? "通用配置"
+        let watermarkType = config.int("pref_watermark_type_key")
 
-        var layout: WatermarkLayout
-        if let type = config.int("pref_watermark_type_key") {
-            switch type {
+        let globalSaturation = config.number("lib_gpu_saturation_key") ?? 1.0
+        let globalVibrance = config.number("lib_gpu_vibrance_key") ?? 1.0
+        let globalContrast = config.number("lib_gpu_contrast_key") ?? 1.0
+        let globalHue = config.number("lib_gpu_hue_key") ?? 0.0
+
+        let profileIDs = config.profileIndices()
+        let ids = profileIDs.isEmpty ? [0] : profileIDs
+
+        return ids.map { index in
+            let title = config.profileTitle(index)
+
+            let baseSaturation =
+                config.profileNumber("lib_pref_satcct_key", profile: index) ??
+                globalSaturation
+            let r =
+                config.profileNumber("lib_pref_red_coeff_key", profile: index) ??
+                config.profileNumber("lib_pref_satcct_r_key", profile: index) ??
+                1.0
+            let g =
+                config.profileNumber("lib_pref_green_coeff_key", profile: index) ??
+                config.profileNumber("lib_pref_satcct_g_key", profile: index) ??
+                1.0
+            let b =
+                config.profileNumber("lib_pref_blue_coeff_key", profile: index) ??
+                config.profileNumber("lib_pref_satcct_b_key", profile: index) ??
+                1.0
+
+            let saturation = clamp(
+                baseSaturation * (0.90 + globalVibrance * 0.10),
+                0.60,
+                1.45
+            )
+
+            let c2 = config.profileNumber("lib_contrast_2_key", profile: index) ?? 0.46
+            let cb = config.profileNumber("lib_contrast_black_key", profile: index) ?? 0.85
+            let contrast = clamp(
+                globalContrast * (0.96 + (c2 - 0.46) * 0.55 + (cb - 0.85) * 0.18),
+                0.78,
+                1.30
+            )
+
+            let darkExposure =
+                config.profileNumber("lib_exposure_darker_key", profile: index) ??
+                config.number("lib_gpu_brightness_key") ?? 0.0
+
+            let tone = config.profileNumber("lib_tone_key", profile: index) ?? 15.0
+            let gamma = config.profileNumber("lib_gamma_key", profile: index) ?? 5.0
+
+            let exposure = clamp(
+                finite(darkExposure * 0.02 + (tone - 15.0) * 0.006 + (gamma - 5.0) * 0.004, fallback: 0),
+                -1.0,
+                1.0
+            )
+
+            let hdrPlus =
+                config.profileNumber("lib_hdr_range_plus_key", profile: index) ??
+                config.number("lib_hdr_range_plus_key") ?? 5.0
+            let hdrMinus =
+                config.profileNumber("lib_hdr_range_minus_key", profile: index) ??
+                config.number("lib_hdr_range_minus_key") ?? -3.0
+
+            let highlights = clamp(0.78 - hdrPlus * 0.045, 0.18, 0.90)
+            let shadows = clamp(0.18 + abs(hdrMinus) * 0.055, 0.05, 0.65)
+
+            let sharp =
+                config.profileNumber("lib_sharp_gain_key", profile: index) ??
+                config.profileNumber("lib_sharp_gain_micro_key", profile: index) ??
+                config.profileNumber("lib_sharp_gain_macro_key", profile: index) ??
+                config.profileNumber("lib_luma_denoise_new_a", profile: index) ??
+                0.25
+
+            let sharpness = clamp(sharp, 0.05, 1.0)
+
+            let denoise =
+                config.profileNumber("lib_denoise_smoothing_key", profile: index) ??
+                config.profileNumber("lib_smoothing_sabre_key", profile: index) ??
+                0.0
+
+            let warmth = clamp((r - b) * 8.0 + globalHue / 30.0, -12.0, 12.0)
+            let tint = clamp((g - ((r + b) / 2.0)) * 6.0, -8.0, 8.0)
+
+            let frameCount =
+                config.profileInt("lib_pref_frame_count_key", profile: index) ??
+                config.profileInt("lib_pref_frame_count_zsl_key", profile: index) ??
+                config.profileInt("lib_pref_frame_count_ns_key", profile: index)
+
+            let isoValue = config.profileValue("lib_iso_key", profile: index)
+                ?? config.string("pref_iso_key")
+                ?? "自动"
+
+            let focal = config.string("pref_lens_title_key_2")
+                ?? config.string("pref_lens_title_key_4")
+                ?? "主摄"
+
+            let layout: WatermarkLayout
+            switch watermarkType {
             case 1: layout = .verticalLeft
             case 2: layout = .verticalRight
             case 3: layout = .topRight
-            default: layout = WatermarkLayout.forBrand(brand, style: "自然")
+            default: layout = .bottomBand
             }
-        } else {
-            layout = WatermarkLayout.forBrand(brand, style: "自然")
-        }
 
-        return CameraPreset(
-            id: "agc-\(UUID().uuidString)",
-            brand: brand,
-            model: model,
-            lens: "\(lens) · \(fileName)",
-            focal: focal,
-            aperture: aperture,
-            iso: "ISO \(config.string("pref_expcomp_key") ?? "100")",
-            shutter: "—",
-            style: "AGC 导入",
-            exposure: Float(exposure),
-            saturation: Float(sat),
-            contrast: Float(con),
-            highlights: Float(hi),
-            shadows: Float(sh),
-            sharpness: Float(min(1.0, max(0.05, sharpness == 0 ? 0.25 : sharpness))),
-            warmth: Float(warm),
-            tint: Float(config.number("lib_gpu_hue_key") ?? 0),
-            channelBias: 0,
-            exifMake: brand,
-            exifModel: model,
-            watermarkLayout: layout
-        )
+            let suffix = frameCount.map { " · 合成 \(String($0)) 帧" } ?? ""
+
+            return CameraPreset(
+                id: "agc-\(fileName)-p\(index)-\(UUID().uuidString)",
+                brand: brand,
+                model: "\(model) · \(title)",
+                lens: "\(focal) · \(fileName)",
+                focal: focal.contains("75") ? "75mm" : "28mm",
+                aperture: "F1.8",
+                iso: "ISO \(isoValue)",
+                shutter: "自动",
+                style: "安卓配置 · \(title)",
+                exposure: Float(exposure),
+                saturation: Float(saturation),
+                contrast: Float(contrast),
+                highlights: Float(highlights),
+                shadows: Float(shadows),
+                sharpness: Float(clamp(sharpness - denoise * 0.02, 0.05, 1.0)),
+                warmth: Float(warmth),
+                tint: Float(tint),
+                channelBias: 0,
+                exifMake: brand,
+                exifModel: model,
+                watermarkLayout: layout
+            )
+        }
     }
 }
 
-// MARK: - 相机引擎
+//// MARK: - 相机引擎
 
 @MainActor
 final class CameraEngine: NSObject, ObservableObject {
@@ -1334,9 +1512,15 @@ struct ContentView: View {
                 defer { if accessing { url.stopAccessingSecurityScopedResource() } }
                 let data = try Data(contentsOf: url)
                 let config = try AGCXMLParser().parse(data)
-                let imported = AGCMapper.makePreset(from: config, fileName: url.lastPathComponent)
-                agcStore.imported.insert(imported, at: 0)
-                preset = imported
+                let imported = AGCMapper.makePresets(from: config, fileName: url.lastPathComponent)
+
+                // 一个 .agc 可能包含十几个甚至二十多个 Profile，
+                // 这里全部导入，而不是只拿第一个。
+                agcStore.imported.insert(contentsOf: imported, at: 0)
+                if let first = imported.first {
+                    preset = first
+                }
+                profile = .natural
             } catch {
                 camera.errorMessage = "AGC 导入失败：\(error.localizedDescription)"
             }
@@ -1469,7 +1653,7 @@ struct ContentView: View {
                         Button {
                             if let item = agcStore.imported.first { preset = item }
                         } label: {
-                            Text("已导入配置")
+                            Text("已加载安卓配置")
                                 .font(.system(size: 11, weight: .bold))
                                 .padding(.horizontal, 11)
                                 .padding(.vertical, 8)
@@ -1594,7 +1778,7 @@ struct ContentView: View {
     private var presetPicker: some View {
         NavigationStack {
             List {
-                Section("已导入的配置") {
+                Section("已加载的安卓配置") {
                     if agcStore.imported.isEmpty {
                         Text("还没有导入配置文件。")
                             .foregroundStyle(.secondary)
@@ -1609,7 +1793,7 @@ struct ContentView: View {
                         }
                     }
 
-                    Button("导入安卓配置文件") {
+                    Button("加载安卓配置文件") {
                         showPresetPicker = false
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
                             showAGCImporter = true
@@ -1664,8 +1848,8 @@ struct ContentView: View {
     private var settingsSheet: some View {
         NavigationStack {
             Form {
-                Section("配置文件") {
-                    Button("导入安卓配置文件") {
+                Section("安卓配置文件") {
+                    Button("加载安卓配置文件") {
                         showSettings = false
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
                             showAGCImporter = true
