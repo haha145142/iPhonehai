@@ -1981,7 +1981,8 @@ struct ContentView: View {
                 session: camera.session,
                 output: camera.videoOutput,
                 preset: effectivePreset,
-                isFrozen: camera.isProcessing
+                isFrozen: camera.isProcessing,
+                rotationAngle: camera.previewRotationAngle
             )
             .ignoresSafeArea()
 
