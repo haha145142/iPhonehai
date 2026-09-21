@@ -13,6 +13,65 @@ import CoreMedia
 
 // MARK: - 基础数据
 
+enum GCamProfile: String, CaseIterable, Identifiable {
+    case natural = "自然"
+    case bright = "明亮"
+    case night = "夜景"
+    case motion = "运动"
+
+    var id: String { rawValue }
+    var title: String { rawValue }
+
+    func applying(to preset: CameraPreset) -> CameraPreset {
+        switch self {
+        case .natural:
+            return preset
+        case .bright:
+            return CameraPreset(
+                id: preset.id + "-bright", brand: preset.brand, model: preset.model, lens: preset.lens,
+                focal: preset.focal, aperture: preset.aperture, iso: preset.iso, shutter: preset.shutter,
+                style: "明亮",
+                exposure: preset.exposure + 0.22,
+                saturation: preset.saturation,
+                contrast: max(0.80, preset.contrast * 0.94),
+                highlights: max(0.0, preset.highlights * 0.78),
+                shadows: min(1.0, preset.shadows + 0.12),
+                sharpness: preset.sharpness * 0.92,
+                warmth: preset.warmth, tint: preset.tint, channelBias: preset.channelBias,
+                exifMake: preset.exifMake, exifModel: preset.exifModel, watermarkLayout: preset.watermarkLayout
+            )
+        case .night:
+            return CameraPreset(
+                id: preset.id + "-night", brand: preset.brand, model: preset.model, lens: preset.lens,
+                focal: preset.focal, aperture: preset.aperture, iso: preset.iso, shutter: preset.shutter,
+                style: "夜景",
+                exposure: preset.exposure + 0.10,
+                saturation: preset.saturation * 0.96,
+                contrast: max(0.78, preset.contrast * 0.92),
+                highlights: max(0.0, preset.highlights * 0.62),
+                shadows: min(1.0, preset.shadows + 0.20),
+                sharpness: preset.sharpness * 0.82,
+                warmth: preset.warmth, tint: preset.tint, channelBias: preset.channelBias,
+                exifMake: preset.exifMake, exifModel: preset.exifModel, watermarkLayout: preset.watermarkLayout
+            )
+        case .motion:
+            return CameraPreset(
+                id: preset.id + "-motion", brand: preset.brand, model: preset.model, lens: preset.lens,
+                focal: preset.focal, aperture: preset.aperture, iso: preset.iso, shutter: preset.shutter,
+                style: "运动",
+                exposure: preset.exposure + 0.03,
+                saturation: preset.saturation,
+                contrast: min(1.25, preset.contrast * 1.05),
+                highlights: preset.highlights,
+                shadows: preset.shadows,
+                sharpness: min(1.0, preset.sharpness + 0.18),
+                warmth: preset.warmth, tint: preset.tint, channelBias: preset.channelBias,
+                exifMake: preset.exifMake, exifModel: preset.exifModel, watermarkLayout: preset.watermarkLayout
+            )
+        }
+    }
+}
+
 enum CaptureMode: CaseIterable, Identifiable {
     case photo, proRAW, livePhoto
 
@@ -165,7 +224,7 @@ enum PresetLibrary {
             ("FUJIFILM","X100VI","FUJINON","23mm","F2.0","ISO 125","1/250s", "富士胶片", 0.96,1.06,0.90,0.12,0.26,1,-1,0.0,"FUJIFILM","X100VI"),
             ("RICOH","GR IIIx","GR Lens","40mm","F2.8","ISO 100","1/500s", "理光街拍", 0.95,1.05,0.91,0.09,0.42,-1,0,0.0,"RICOH IMAGING COMPANY, LTD.","RICOH GR IIIx"),
             ("PANASONIC","S1RII","LUMIX S PRO","50mm","F1.8","ISO 100","1/500s", "松下自然", 0.98,1.07,0.94,0.11,0.33,0,0,0.0,"Panasonic","DC-S1RM2"),
-            ("SIGMA","fp L","Contemporary","45mm","F2.8","ISO 100","1/500s", "适马", 0.97,1.06,0.94,0.12,0.34,0,0,"SIGMA","SIGMA fp L")
+            ("SIGMA","fp L","Contemporary","45mm","F2.8","ISO 100","1/500s", "适马", 0.97,1.06,0.94,0.12,0.34,0,0,0.0,"SIGMA","SIGMA fp L")
         ]
 
         let variants: [(String,Double,Double,Double,Double,Double)] = [
@@ -1210,6 +1269,9 @@ struct ContentView: View {
     @State private var showSettings = false
     @State private var showAGCImporter = false
     @State private var selectedPhoto: PhotosPickerItem?
+    @State private var profile: GCamProfile = .natural
+
+    private var effectivePreset: CameraPreset { profile.applying(to: preset) }
 
     var allPresets: [CameraPreset] {
         agcStore.imported + PresetLibrary.all
@@ -1222,7 +1284,7 @@ struct ContentView: View {
             LiveCameraPreview(
                 session: camera.session,
                 output: camera.videoOutput,
-                preset: preset
+                preset: effectivePreset
             )
             .ignoresSafeArea()
 
@@ -1359,6 +1421,24 @@ struct ContentView: View {
             }
 
             ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 7) {
+                    ForEach(GCamProfile.allCases) { item in
+                        Button {
+                            profile = item
+                        } label: {
+                            Text(item.title)
+                                .font(.system(size: 10, weight: .bold))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 7)
+                                .background(profile == item ? Color.white.opacity(0.94) : Color.black.opacity(0.30), in: Capsule())
+                                .foregroundStyle(profile == item ? Color.black : Color.white)
+                        }
+                    }
+                }
+                .padding(.horizontal, 12)
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(PresetLibrary.brands, id: \.self) { brand in
                         Button {
@@ -1406,7 +1486,7 @@ struct ContentView: View {
                 Button {
                     UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
                     camera.capture(
-                        preset: preset,
+                        preset: effectivePreset,
                         mode: mode,
                         watermark: watermark,
                         metadata: metadata
@@ -1437,7 +1517,7 @@ struct ContentView: View {
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.white.opacity(0.78))
                 Spacer()
-                Text("\(preset.focal) · \(preset.aperture)")
+                Text("\(effectivePreset.focal) · \(effectivePreset.aperture)")
                     .font(.system(size: 10, weight: .medium, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.70))
             }
