@@ -1156,7 +1156,12 @@ final class CameraEngine: NSObject, ObservableObject {
     @Published var lastSavedURL: URL?
     @Published var proRAWSupported = false
     @Published var livePhotoSupported = false
-    @Published private(set) var previewRotationAngle: CGFloat = 0
+    @Published private(set) var previewRotationAngle: CGFloat = 90
+    @Published private(set) var zoomFactor: CGFloat = 1.0
+    @Published var exposureBias: Float = 0
+    @Published var isGridEnabled = true
+    @Published var isFlashEnabled = false
+    @Published var timerSeconds = 0
 
     private var rotationCoordinator: AVCaptureDevice.RotationCoordinator?
     private var previewRotationObservation: NSKeyValueObservation?
@@ -1169,6 +1174,7 @@ final class CameraEngine: NSObject, ObservableObject {
 
     override init() {
         super.init()
+        UIDevice.current.beginGeneratingDeviceOrientationNotifications()
         Task { await prepare() }
     }
 
@@ -1199,7 +1205,10 @@ final class CameraEngine: NSObject, ObservableObject {
         session.sessionPreset = .photo
 
         guard
-            let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
+            let device =
+                AVCaptureDevice.default(.builtInTripleCamera, for: .video, position: .back)
+                ?? AVCaptureDevice.default(.builtInDualWideCamera, for: .video, position: .back)
+                ?? AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
             let input = try? AVCaptureDeviceInput(device: device)
         else {
             session.commitConfiguration()
@@ -1257,6 +1266,83 @@ final class CameraEngine: NSObject, ObservableObject {
         }
     }
 
+    func setZoom(_ requested: CGFloat) {
+        guard let device = currentInput?.device else { return }
+        let target = min(device.maxAvailableVideoZoomFactor, max(device.minAvailableVideoZoomFactor, requested))
+
+        do {
+            try device.lockForConfiguration()
+            if device.isRampingVideoZoom { device.cancelVideoZoomRamp() }
+            device.videoZoomFactor = target
+            device.unlockForConfiguration()
+            zoomFactor = target
+        } catch {
+            errorMessage = "镜头变焦失败。"
+        }
+    }
+
+    func focusAndExpose(at location: CGPoint, in size: CGSize) {
+        guard let device = currentInput?.device, size.width > 0, size.height > 0 else { return }
+
+        let x = min(1, max(0, location.x / size.width))
+        let y = min(1, max(0, location.y / size.height))
+        let point: CGPoint
+
+        switch UIDevice.current.orientation {
+        case .portrait:
+            point = CGPoint(x: y, y: 1 - x)
+        case .portraitUpsideDown:
+            point = CGPoint(x: 1 - y, y: x)
+        case .landscapeLeft:
+            point = CGPoint(x: 1 - x, y: 1 - y)
+        default:
+            point = CGPoint(x: x, y: y)
+        }
+
+        do {
+            try device.lockForConfiguration()
+
+            if device.isFocusPointOfInterestSupported {
+                device.focusPointOfInterest = point
+                if device.isFocusModeSupported(.continuousAutoFocus) {
+                    device.focusMode = .continuousAutoFocus
+                } else if device.isFocusModeSupported(.autoFocus) {
+                    device.focusMode = .autoFocus
+                }
+            }
+
+            if device.isExposurePointOfInterestSupported {
+                device.exposurePointOfInterest = point
+                if device.isExposureModeSupported(.continuousAutoExposure) {
+                    device.exposureMode = .continuousAutoExposure
+                } else if device.isExposureModeSupported(.autoExpose) {
+                    device.exposureMode = .autoExpose
+                }
+            }
+
+            device.unlockForConfiguration()
+        } catch {
+            errorMessage = "无法锁定当前对焦位置。"
+        }
+    }
+
+    func setExposureBias(_ value: Float) {
+        guard let device = currentInput?.device else { return }
+        let clamped = min(device.maxExposureTargetBias, max(device.minExposureTargetBias, value))
+
+        do {
+            try device.lockForConfiguration()
+            if device.isExposureModeSupported(.continuousAutoExposure) {
+                device.exposureMode = .continuousAutoExposure
+                device.setExposureTargetBias(clamped, completionHandler: nil)
+            }
+            device.unlockForConfiguration()
+            exposureBias = clamped
+        } catch {
+            errorMessage = "曝光调整失败。"
+        }
+    }
+
     func flipCamera() {
         guard let old = currentInput else { return }
         let position: AVCaptureDevice.Position = old.device.position == .back ? .front : .back
@@ -1276,21 +1362,32 @@ final class CameraEngine: NSObject, ObservableObject {
     }
 
     private func updateCameraRotation() {
-        let fallback: CGFloat = 0
-        let captureAngle = rotationCoordinator?.videoRotationAngleForHorizonLevelCapture ?? fallback
-        let previewAngle = rotationCoordinator?.videoRotationAngleForHorizonLevelPreview ?? fallback
-        previewRotationAngle = previewAngle
+        let orientation = UIDevice.current.orientation
+        let angle: CGFloat
 
-        // 自定义取景使用 AVCaptureVideoDataOutput；根据 Apple 的建议，
-        // 不在连接层旋转每一帧，而是在取景渲染层做旋转。
+        switch orientation {
+        case .portrait:
+            angle = 90
+        case .portraitUpsideDown:
+            angle = 270
+        case .landscapeLeft:
+            angle = 180
+        case .landscapeRight:
+            angle = 0
+        default:
+            angle = 90
+        }
+
+        previewRotationAngle = angle
+
         if let videoConnection = videoOutput.connection(with: .video),
            videoConnection.isVideoRotationAngleSupported(0) {
             videoConnection.videoRotationAngle = 0
         }
 
         if let photoConnection = photoOutput.connection(with: .video),
-           photoConnection.isVideoRotationAngleSupported(captureAngle) {
-            photoConnection.videoRotationAngle = captureAngle
+           photoConnection.isVideoRotationAngleSupported(angle) {
+            photoConnection.videoRotationAngle = angle
         }
     }
 
@@ -1732,10 +1829,18 @@ final class LivePreviewView: MTKView, AVCaptureVideoDataOutputSampleBufferDelega
 
         guard let buffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
 
-        // 方向由相机连接统一处理，避免取景层二次旋转。
         var source = CIImage(cvPixelBuffer: buffer)
-        if abs(rotationAngle) > 0.5 {
-            source = source.transformed(by: CGAffineTransform(rotationAngle: rotationAngle * .pi / 180.0))
+        switch UIDevice.current.orientation {
+        case .portrait:
+            source = source.oriented(.right)
+        case .portraitUpsideDown:
+            source = source.oriented(.left)
+        case .landscapeLeft:
+            source = source.oriented(.down)
+        case .landscapeRight:
+            source = source.oriented(.up)
+        default:
+            source = source.oriented(.right)
         }
 
         let maxDimension = max(source.extent.width, source.extent.height)
