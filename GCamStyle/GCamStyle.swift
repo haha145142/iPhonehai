@@ -72,6 +72,71 @@ enum GCamProfile: String, CaseIterable, Identifiable {
     }
 }
 
+enum ScenePreset: String, CaseIterable, Identifiable, Sendable {
+    case photo = "照片"
+    case portrait = "人像"
+    case night = "夜景"
+
+    var id: String { rawValue }
+
+    func applying(to preset: CameraPreset) -> CameraPreset {
+        switch self {
+        case .photo:
+            return preset
+        case .portrait:
+            return CameraPreset(
+                id: preset.id + "-portrait",
+                brand: preset.brand,
+                model: preset.model,
+                lens: preset.lens,
+                focal: preset.focal,
+                aperture: preset.aperture,
+                iso: preset.iso,
+                shutter: preset.shutter,
+                style: "人像",
+                exposure: preset.exposure + 0.08,
+                saturation: min(1.35, preset.saturation * 0.97),
+                contrast: max(0.80, preset.contrast * 0.88),
+                highlights: min(0.95, preset.highlights + 0.04),
+                shadows: min(0.80, preset.shadows + 0.10),
+                sharpness: max(0.10, preset.sharpness * 0.78),
+                warmth: preset.warmth + 0.30,
+                tint: preset.tint,
+                channelBias: preset.channelBias,
+                exifMake: preset.exifMake,
+                exifModel: preset.exifModel,
+                watermarkLayout: preset.watermarkLayout,
+                agcProfile: preset.agcProfile
+            )
+        case .night:
+            return CameraPreset(
+                id: preset.id + "-night",
+                brand: preset.brand,
+                model: preset.model,
+                lens: preset.lens,
+                focal: preset.focal,
+                aperture: preset.aperture,
+                iso: preset.iso,
+                shutter: preset.shutter,
+                style: "夜景",
+                exposure: min(1.0, preset.exposure + 0.32),
+                saturation: preset.saturation * 0.96,
+                contrast: max(0.76, preset.contrast * 0.90),
+                highlights: max(0.10, preset.highlights * 0.72),
+                shadows: min(0.85, preset.shadows + 0.22),
+                sharpness: preset.sharpness * 0.72,
+                warmth: preset.warmth - 0.10,
+                tint: preset.tint,
+                channelBias: preset.channelBias,
+                exifMake: preset.exifMake,
+                exifModel: preset.exifModel,
+                watermarkLayout: preset.watermarkLayout,
+                agcProfile: preset.agcProfile
+            )
+        }
+    }
+}
+
 enum CaptureMode: CaseIterable, Identifiable, Sendable {
     case photo, proRAW, livePhoto
 
@@ -323,6 +388,7 @@ struct CameraPreset: Identifiable, Hashable, Sendable {
     let exifMake: String
     let exifModel: String
     let watermarkLayout: WatermarkLayout
+    let watermarkBrand: String?
     let agcProfile: AGCRenderProfile?
 
     init(
@@ -347,6 +413,7 @@ struct CameraPreset: Identifiable, Hashable, Sendable {
         exifMake: String,
         exifModel: String,
         watermarkLayout: WatermarkLayout,
+        watermarkBrand: String? = nil,
         agcProfile: AGCRenderProfile? = nil
     ) {
         self.id = id
@@ -370,6 +437,7 @@ struct CameraPreset: Identifiable, Hashable, Sendable {
         self.exifMake = exifMake
         self.exifModel = exifModel
         self.watermarkLayout = watermarkLayout
+        self.watermarkBrand = watermarkBrand
         self.agcProfile = agcProfile
     }
 
@@ -396,7 +464,7 @@ struct CameraPreset: Identifiable, Hashable, Sendable {
     }
 
     var watermarkAccent: UIColor {
-        switch brand.uppercased() {
+        switch (watermarkBrand ?? brand).uppercased() {
         case "LEICA": return UIColor(red: 0.90, green: 0.10, blue: 0.07, alpha: 1)
         case "HASSELBLAD": return UIColor(red: 1.00, green: 0.54, blue: 0.06, alpha: 1)
         case "ZEISS", "VIVO": return UIColor(red: 0.14, green: 0.52, blue: 0.95, alpha: 1)
@@ -791,10 +859,10 @@ enum AGCMapper {
     private static func curve(for config: AGCConfig, profile: Int, cameraIndex: Int = 0) -> (tone: [Float], gamma: [Float]) {
         for customIndex in 1...10 {
             for slotIndex in 0...5 {
-                let enabledKey = "lib_custom_(custom)_key_p(profile)_(slot)_enabled"
+                let enabledKey = "lib_custom_\(customIndex)_key_p\(profile)_\(slotIndex)_enabled"
                 guard config.string(enabledKey) == "1" else { continue }
-                let title = config.string("lib_custom_(custom)_key_p(profile)_(slot)_title") ?? ""
-                let value = config.string("lib_custom_(custom)_key_p(profile)_(slot)_value") ?? ""
+                let title = config.string("lib_custom_\(customIndex)_key_p\(profile)_\(slotIndex)_title") ?? ""
+                let value = config.string("lib_custom_\(customIndex)_key_p\(profile)_\(slotIndex)_value") ?? ""
                 if !value.isEmpty {
                     return AGCCurveDecoder.decode(hex: value, title: title)
                 }
@@ -803,9 +871,9 @@ enum AGCMapper {
 
         // Some configs keep the active curve in a camera-specific slot.
         for slot in 0...5 {
-            let value = config.string("lib_custom_1_key_p(profile)_(slot)_value") ?? ""
+            let value = config.string("lib_custom_1_key_p\(profile)_\(slot)_value") ?? ""
             if !value.isEmpty {
-                let title = config.string("lib_custom_1_key_p(profile)_(slot)_title") ?? ""
+                let title = config.string("lib_custom_1_key_p\(profile)_\(slot)_title") ?? ""
                 return AGCCurveDecoder.decode(hex: value, title: title)
             }
         }
@@ -965,6 +1033,109 @@ enum AGCMapper {
         default: layout = .bottom
         }
         return (enabled, title, layout)
+    }
+}
+
+struct AGCProfileDefinition: Sendable {
+    let index: Int
+    let title: String
+    let tonePreset: Int?
+    let gammaPreset: Int?
+    let sectPreset: Int?
+    let tone: Float
+    let gamma: Float
+    let saturation: Float
+    let red: Float
+    let green: Float
+    let blue: Float
+    let hdrPlus: Float
+    let hdrMinus: Float
+    let frameCount: Int
+    let zslFrameCount: Int
+    let nsFrameCount: Int
+    let denoise: Float
+    let sharp: Float
+}
+
+enum AGCProfileLibrary {
+    private static let definitions: [AGCProfileDefinition] = [
+        .init(index: 0, title: "标准低噪 🖼", tonePreset: 8, gammaPreset: 3, sectPreset: 3, tone: 15, gamma: 8, saturation: 1, red: 1, green: 1, blue: 1, hdrPlus: 5, hdrMinus: -3, frameCount: 0, zslFrameCount: 20, nsFrameCount: 0, denoise: 0.46875, sharp: 0),
+        .init(index: 1, title: "柔和细节 🍄", tonePreset: 19, gammaPreset: 7, sectPreset: 2, tone: 23, gamma: 11, saturation: 1, red: 1, green: 1, blue: 1, hdrPlus: 13.5, hdrMinus: -1.25, frameCount: 0, zslFrameCount: 0, nsFrameCount: 0, denoise: 0.46875, sharp: 1),
+        .init(index: 2, title: "亮丽HDR 🌅", tonePreset: nil, gammaPreset: 7, sectPreset: 3, tone: 14, gamma: 7, saturation: 1, red: 1, green: 1, blue: 1, hdrPlus: 14.5, hdrMinus: -3.5, frameCount: 0, zslFrameCount: 0, nsFrameCount: 0, denoise: 0.46875, sharp: 1.35),
+        .init(index: 3, title: "夜色花火 🎆", tonePreset: nil, gammaPreset: nil, sectPreset: nil, tone: 15, gamma: 8, saturation: 1, red: 1, green: 1, blue: 1, hdrPlus: 5, hdrMinus: -3, frameCount: 0, zslFrameCount: 0, nsFrameCount: 0, denoise: 0.46875, sharp: 0),
+        .init(index: 4, title: "数码CCD 📸", tonePreset: 8, gammaPreset: 3, sectPreset: nil, tone: 8, gamma: 3, saturation: 1.15, red: 1.04, green: 1.06, blue: 1.26, hdrPlus: 15, hdrMinus: -0.875, frameCount: 0, zslFrameCount: 0, nsFrameCount: 0, denoise: 0.46875, sharp: 0.6),
+        .init(index: 5, title: "运动抓拍 🚴‍♂️", tonePreset: 8, gammaPreset: 3, sectPreset: 3, tone: 32, gamma: 11, saturation: 1, red: 0.92, green: 1.02, blue: 1, hdrPlus: 14.5, hdrMinus: -2, frameCount: 5, zslFrameCount: 7, nsFrameCount: 5, denoise: 0.46875, sharp: 0),
+        .init(index: 6, title: "鲜艳徕卡 🌈", tonePreset: 8, gammaPreset: 3, sectPreset: 3, tone: 15, gamma: 8, saturation: 1.1, red: 1.02, green: 1, blue: 0.96, hdrPlus: 14.5, hdrMinus: -1.25, frameCount: 0, zslFrameCount: 0, nsFrameCount: 0, denoise: 0.46875, sharp: 0),
+        .init(index: 7, title: "复古徕卡 📽", tonePreset: 19, gammaPreset: 7, sectPreset: 2, tone: 15, gamma: 8, saturation: 0.9, red: 1.04, green: 1.02, blue: 1.04, hdrPlus: 3.5, hdrMinus: -2, frameCount: 0, zslFrameCount: 0, nsFrameCount: 0, denoise: 0.46875, sharp: 1.4),
+        .init(index: 8, title: "金属徕卡 ⚓️", tonePreset: nil, gammaPreset: nil, sectPreset: nil, tone: 2, gamma: 3, saturation: 1, red: 1.08, green: 1, blue: 0.92, hdrPlus: 10.5, hdrMinus: -0.25, frameCount: 0, zslFrameCount: 0, nsFrameCount: 0, denoise: 0.46875, sharp: 0.9),
+        .init(index: 9, title: "糖果轻颜 🧝‍♀️", tonePreset: nil, gammaPreset: 7, sectPreset: 3, tone: 2, gamma: 11, saturation: 1.15, red: 0.94, green: 1.16, blue: 1.12, hdrPlus: 7, hdrMinus: -1.75, frameCount: 28, zslFrameCount: 12, nsFrameCount: 0, denoise: 0.46875, sharp: 0),
+        .init(index: 10, title: "普罗维亚 🌆", tonePreset: 19, gammaPreset: 7, sectPreset: 2, tone: 2, gamma: 8, saturation: 0.85, red: 1.32, green: 1.32, blue: 1.08, hdrPlus: 7, hdrMinus: -1.5, frameCount: 0, zslFrameCount: 0, nsFrameCount: 0, denoise: 0.46875, sharp: 0.35),
+        .init(index: 11, title: "浪漫电影 🎊", tonePreset: 8, gammaPreset: 3, sectPreset: nil, tone: 28, gamma: 7, saturation: 1.06, red: 1.06, green: 0.84, blue: 0.74, hdrPlus: 14.5, hdrMinus: -1.5, frameCount: 0, zslFrameCount: 0, nsFrameCount: 0, denoise: 0.46875, sharp: 1.1),
+        .init(index: 12, title: "暗调负片 🎞", tonePreset: 19, gammaPreset: 7, sectPreset: 2, tone: 15, gamma: 8, saturation: 0.75, red: 0.98, green: 0.8, blue: 1.18, hdrPlus: 10.5, hdrMinus: 1.25, frameCount: 0, zslFrameCount: 0, nsFrameCount: 0, denoise: 0.46875, sharp: 0.45),
+        .init(index: 13, title: "柯达多彩 🌸", tonePreset: 19, gammaPreset: 7, sectPreset: 2, tone: 15, gamma: 8, saturation: 1, red: 0.8, green: 1, blue: 0.8, hdrPlus: 3.5, hdrMinus: -9, frameCount: 0, zslFrameCount: 0, nsFrameCount: 0, denoise: 0.46875, sharp: 0.45),
+        .init(index: 14, title: "日光胶片 ☀️", tonePreset: 19, gammaPreset: 7, sectPreset: 2, tone: 15, gamma: 8, saturation: 0.75, red: 0.94, green: 1.16, blue: 1.14, hdrPlus: 16, hdrMinus: -0.625, frameCount: 0, zslFrameCount: 0, nsFrameCount: 0, denoise: 0.46875, sharp: 0.45),
+        .init(index: 15, title: "LUT+超细节", tonePreset: 19, gammaPreset: 7, sectPreset: 2, tone: 15, gamma: 8, saturation: 1, red: 1, green: 1, blue: 1, hdrPlus: 5, hdrMinus: -3, frameCount: 0, zslFrameCount: 50, nsFrameCount: 0, denoise: 0.46875, sharp: 0),
+        .init(index: 16, title: "LUT+低动态", tonePreset: 19, gammaPreset: 7, sectPreset: 2, tone: 15, gamma: 8, saturation: 0.9, red: 1, green: 1, blue: 1, hdrPlus: 6.5, hdrMinus: -0.375, frameCount: 0, zslFrameCount: 0, nsFrameCount: 0, denoise: 0.46875, sharp: 0),
+        .init(index: 17, title: "LUT+高动态", tonePreset: 19, gammaPreset: 7, sectPreset: 2, tone: 22, gamma: 1, saturation: 1.15, red: 1, green: 1, blue: 1, hdrPlus: 6, hdrMinus: -2, frameCount: 0, zslFrameCount: 0, nsFrameCount: 0, denoise: 0.46875, sharp: 0.375)
+    ]
+
+    static let shadowChasing: [CameraPreset] = definitions.map { d in
+        let warmth = Float(max(-12, min(12, Double(d.red - d.blue) * 8.0)))
+        let tint = Float(max(-8, min(8, Double(d.green - (d.red + d.blue) / 2.0) * 7.0)))
+        let exposure = Float(max(-0.8, min(0.8, (Double(d.tone) - 15.0) * 0.008 + (Double(d.gamma) - 8.0) * 0.006)))
+        let highlights = Float(max(0.12, min(0.92, 0.84 - Double(d.hdrPlus) * 0.032)))
+        let shadows = Float(max(0.06, min(0.82, 0.18 + abs(Double(d.hdrMinus)) * 0.065)))
+        let contrast = Float(max(0.78, min(1.42, 0.94 + (d.tonePreset == 19 ? 0.07 : 0) + abs(Double(d.hdrMinus)) * 0.010)))
+        let sharp = Float(max(0.06, min(0.92, Double(d.sharp)))
+
+        let render = AGCRenderProfile(
+            index: d.index,
+            title: d.title,
+            red: d.red,
+            green: d.green,
+            blue: d.blue,
+            saturation: d.saturation,
+            contrast2: nil,
+            blackLevel: nil,
+            hdrPlus: d.hdrPlus,
+            hdrMinus: d.hdrMinus,
+            frameCount: d.frameCount,
+            zslFrameCount: d.zslFrameCount,
+            nsFrameCount: d.nsFrameCount,
+            sharpGain: d.sharp,
+            darkerExposure: nil,
+            tonePreset: d.tonePreset,
+            gammaPreset: d.gammaPreset,
+            lutIndex: 0,
+            toneCurve: [],
+            gammaCurve: []
+        )
+
+        return CameraPreset(
+            id: "agc-shadowchasing-\(d.index)",
+            brand: "AGC",
+            model: d.title,
+            lens: "影踪追寻 · 通用配置",
+            focal: "主摄",
+            aperture: "自动",
+            iso: "自动",
+            shutter: "自动",
+            style: "AGC",
+            exposure: exposure,
+            saturation: d.saturation,
+            contrast: contrast,
+            highlights: highlights,
+            shadows: shadows,
+            sharpness: sharp,
+            warmth: warmth,
+            tint: tint,
+            channelBias: 0,
+            exifMake: "安卓配置",
+            exifModel: d.title,
+            watermarkLayout: .verticalLeft,
+            watermarkBrand: "LEICA",
+            agcProfile: render
+        )
     }
 }
 
@@ -1650,6 +1821,26 @@ enum PhotoProcessor {
         controls.brightness = 0
 
         var output = controls.outputImage ?? input
+
+        if let agc = preset.agcProfile {
+            output = applyAGCTone(output, tonePreset: agc.tonePreset, amount: agc.gammaPreset ?? 0, gammaValue: agc.gammaPreset ?? 0)
+
+            let matrix = CIFilter.colorMatrix()
+            matrix.inputImage = output
+            matrix.rVector = CIVector(x: CGFloat(agc.red), y: 0, z: 0, w: 0)
+            matrix.gVector = CIVector(x: 0, y: CGFloat(agc.green), z: 0, w: 0)
+            matrix.bVector = CIVector(x: 0, y: 0, z: CGFloat(agc.blue), w: 0)
+            matrix.aVector = CIVector(x: 0, y: 0, z: 0, w: 1)
+            output = matrix.outputImage ?? output
+
+            if let g = agc.gammaPreset {
+                let gamma = CIFilter.gammaAdjust()
+                gamma.inputImage = output
+                gamma.power = max(0.78, min(1.24, 1.0 + Float(g - 5) * 0.016))
+                output = gamma.outputImage ?? output
+            }
+        }
+
         if let lut = LUTStore.shared.current {
             output = applyLUT(output, lut: lut)
         }
@@ -1677,7 +1868,10 @@ enum PhotoProcessor {
             matrix.rVector = CIVector(x: CGFloat(agc.red), y: 0, z: 0, w: 0)
             matrix.gVector = CIVector(x: 0, y: CGFloat(agc.green), z: 0, w: 0)
             matrix.bVector = CIVector(x: 0, y: 0, z: CGFloat(agc.blue), w: 0)
+            matrix.aVector = CIVector(x: 0, y: 0, z: 0, w: 1)
             current = matrix.outputImage ?? current
+
+            current = applyAGCTone(current, tonePreset: agc.tonePreset, amount: agc.gammaPreset ?? 0, gammaValue: agc.gammaPreset ?? 0)
 
             if let black = agc.blackLevel {
                 let lifted = CIFilter.colorControls()
@@ -1686,6 +1880,13 @@ enum PhotoProcessor {
                 lifted.saturation = 1
                 lifted.contrast = 1
                 current = lifted.outputImage ?? current
+            }
+
+            if let g = agc.gammaPreset {
+                let gamma = CIFilter.gammaAdjust()
+                gamma.inputImage = current
+                gamma.power = max(0.78, min(1.24, 1.0 + Float(g - 5) * 0.016))
+                current = gamma.outputImage ?? current
             }
 
             if !agc.toneCurve.isEmpty {
@@ -1720,6 +1921,65 @@ enum PhotoProcessor {
             current = applyLUT(current, lut: lut)
         }
         return current
+    }
+
+    private static func applyAGCTone(
+        _ image: CIImage,
+        tonePreset: Int?,
+        amount: Int,
+        gammaValue: Int
+    ) -> CIImage {
+        guard let filter = CIFilter(name: "CIToneCurve") else { return image }
+
+        let points: [(CGFloat, CGFloat)]
+        switch tonePreset ?? 8 {
+        case 19:
+            // AGC 影踪追寻中大量胶片/负片 Profile 使用的 19 号曲线：
+            // 保留黑位，同时让中间调更有层次，高光柔和收尾。
+            points = [
+                (0.00, 0.015),
+                (0.25, 0.205),
+                (0.50, 0.515),
+                (0.75, 0.805),
+                (1.00, 0.975)
+            ]
+        case 8:
+            points = [
+                (0.00, 0.008),
+                (0.25, 0.225),
+                (0.50, 0.500),
+                (0.75, 0.785),
+                (1.00, 0.990)
+            ]
+        case 2:
+            points = [
+                (0.00, 0.02),
+                (0.25, 0.19),
+                (0.50, 0.49),
+                (0.75, 0.82),
+                (1.00, 0.995)
+            ]
+        default:
+            points = [
+                (0.00, 0.01),
+                (0.25, 0.225),
+                (0.50, 0.50),
+                (0.75, 0.78),
+                (1.00, 0.99)
+            ]
+        }
+
+        let strength = CGFloat(max(0.35, min(1.20, Double(abs(amount)) / 8.0 + 0.35)))
+        let center = 0.50 + (points[2].1 - 0.50) * (strength - 0.35) * 0.20
+        let p2 = CIVector(x: 0.50, y: center)
+
+        filter.setValue(image, forKey: kCIInputImageKey)
+        filter.setValue(CIVector(x: points[0].0, y: points[0].1), forKey: "inputPoint0")
+        filter.setValue(CIVector(x: points[1].0, y: points[1].1), forKey: "inputPoint1")
+        filter.setValue(p2, forKey: "inputPoint2")
+        filter.setValue(CIVector(x: points[3].0, y: points[3].1), forKey: "inputPoint3")
+        filter.setValue(CIVector(x: points[4].0, y: points[4].1), forKey: "inputPoint4")
+        return filter.outputImage ?? image
     }
 
     private static func clampAGC(_ value: Float) -> Float {
@@ -2205,7 +2465,7 @@ struct ContentView: View {
     @EnvironmentObject private var camera: CameraEngine
     @StateObject private var agcStore = AGCStore()
 
-    @State private var preset = PresetLibrary.all[0]
+    @State private var preset = AGCProfileLibrary.shadowChasing[0]
     @State private var mode: CaptureMode = .photo
     @State private var watermark = true
     @State private var metadata = MetadataDraft()
@@ -2213,13 +2473,13 @@ struct ContentView: View {
     @State private var showSettings = false
     @State private var showAGCImporter = false
     @State private var selectedPhoto: PhotosPickerItem?
-    @State private var profile: GCamProfile = .natural
     @State private var watermarkConfig = CustomWatermarkConfig()
+    @State private var scene: ScenePreset = .photo
     @State private var showLUTImporter = false
     @State private var showLogoImporter = false
     @State private var activeLUTName = ""
 
-    private var effectivePreset: CameraPreset { profile.applying(to: preset) }
+    private var effectivePreset: CameraPreset { scene.applying(to: preset) }
 
     var allPresets: [CameraPreset] {
         agcStore.imported + PresetLibrary.all
@@ -2325,8 +2585,7 @@ struct ContentView: View {
                         agcStore.sourceName = result.1.joined(separator: "、")
                         agcStore.enabled = true
                         preset = result.0[0]
-                        profile = .natural
-                        camera.errorMessage = "已加载 \(result.0.count) 个安卓配置档案。"
+                                camera.errorMessage = "已加载 \(result.0.count) 个安卓配置档案。"
                     case .failure(let error):
                         camera.errorMessage = "安卓配置导入失败：\(error.localizedDescription)"
                     }
@@ -2450,7 +2709,63 @@ struct ContentView: View {
     }
 
     private var bottomBar: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 8) {
+            HStack(spacing: 7) {
+                ForEach([0.5, 1.0, 2.5, 5.0], id: \.self) { zoom in
+                    Button {
+                        camera.setZoom(CGFloat(zoom))
+                    } label: {
+                        Text(zoom == 1.0 ? "1×" : String(format: "%.1f×", zoom))
+                            .font(.system(size: 11, weight: .bold))
+                            .frame(minWidth: 46, minHeight: 34)
+                            .background(
+                                abs(camera.zoomFactor - CGFloat(zoom)) < 0.12
+                                ? Color.white.opacity(0.94)
+                                : Color.black.opacity(0.35),
+                                in: Capsule()
+                            )
+                            .foregroundStyle(abs(camera.zoomFactor - CGFloat(zoom)) < 0.12 ? Color.black : Color.white)
+                    }
+                }
+
+                Spacer()
+
+                Button {
+                    camera.isGridEnabled.toggle()
+                } label: {
+                    Image(systemName: camera.isGridEnabled ? "grid" : "grid.circle")
+                        .font(.system(size: 15, weight: .bold))
+                        .frame(width: 38, height: 34)
+                        .background(.ultraThinMaterial, in: Capsule())
+                }
+
+                Button {
+                    camera.flipCamera()
+                } label: {
+                    Image(systemName: "camera.rotate")
+                        .font(.system(size: 15, weight: .bold))
+                        .frame(width: 38, height: 34)
+                        .background(.ultraThinMaterial, in: Capsule())
+                }
+            }
+            .padding(.horizontal, 16)
+
+
+            HStack(spacing: 8) {
+                ForEach(ScenePreset.allCases) { item in
+                    Button {
+                        scene = item
+                    } label: {
+                        Text(item.rawValue)
+                            .font(.system(size: 11, weight: .bold))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(scene == item ? Color.white : Color.black.opacity(0.32), in: Capsule())
+                            .foregroundStyle(scene == item ? Color.black : Color.white)
+                    }
+                }
+            }
+
             HStack(spacing: 8) {
                 ForEach(CaptureMode.allCases) { item in
                     Button {
@@ -2565,7 +2880,7 @@ struct ContentView: View {
             .padding(.horizontal, 18)
 
             HStack {
-                Text(mode == .photo ? "实时风格 · 自动水印" : mode == .proRAW ? "保留专业原片 · 生成风格照片" : "保留原始实况 · 生成风格照片")
+                Text(scene.rawValue + (mode == .photo ? " · 实时风格 · 自动水印" : mode == .proRAW ? " · 保留专业原片" : " · 保留原始实况"))
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.white.opacity(0.78))
                 Spacer()
@@ -2641,7 +2956,7 @@ struct ContentView: View {
             List {
                 Section("已加载的安卓配置") {
                     if !agcStore.imported.isEmpty {
-                        Text("已加载 (agcStore.imported.count) 个配置档案")
+                        Text("已加载 \(agcStore.imported.count) 个配置档案")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
@@ -2885,9 +3200,9 @@ struct ContentView: View {
 
 @MainActor
 final class AGCStore: ObservableObject {
-    @Published var imported: [CameraPreset] = []
-    @Published var enabled = false
-    @Published var sourceName = ""
+    @Published var imported: [CameraPreset] = AGCProfileLibrary.shadowChasing
+    @Published var enabled = true
+    @Published var sourceName = "影踪追寻_通用配置"
 }
 
 @main
