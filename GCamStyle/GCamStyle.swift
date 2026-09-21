@@ -936,7 +936,12 @@ final class CameraEngine: NSObject, ObservableObject {
         isCapturing = false
     }
 
-    fileprivate func handleRaw(data: Data, preset: CameraPreset, metadata: MetadataDraft) {
+    fileprivate func handleRaw(
+        data: Data,
+        preset: CameraPreset,
+        metadata: MetadataDraft,
+        watermarkConfig: CustomWatermarkConfig
+    ) {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("GCamStyle-RAW-\(UUID().uuidString).dng")
 
@@ -978,6 +983,7 @@ final class CameraEngine: NSObject, ObservableObject {
                 preset: preset,
                 metadata: metadata,
                 watermark: true,
+                watermarkConfig: watermarkConfig,
                 sourceProperties: [:]
             )
             let styledData = try Data(contentsOf: styledURL)
@@ -1107,7 +1113,12 @@ final class CaptureProcessorDelegate: NSObject, AVCapturePhotoCaptureDelegate {
             }
 
             if let rawData = self.rawData {
-                owner.handleRaw(data: rawData, preset: self.preset, metadata: self.metadata)
+                owner.handleRaw(
+                    data: rawData,
+                    preset: self.preset,
+                    metadata: self.metadata,
+                    watermarkConfig: self.watermarkConfig
+                )
             }
 
             owner.finish(id: self.settingsID)
