@@ -20,11 +20,6 @@
 	<string>201</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
-	<key>UIDeviceFamily</key>
-	<array>
-		<integer>1</integer>
-		<integer>2</integer>
-	</array>
 	<key>NSCameraUsageDescription</key>
 	<string>用于实时取景、拍摄照片和应用相机风格。</string>
 	<key>NSMicrophoneUsageDescription</key>
