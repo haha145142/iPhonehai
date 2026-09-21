@@ -21,7 +21,7 @@ enum CaptureMode: CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .photo: return "照片"
-        case .proRAW: return "专业 RAW"
+        case .proRAW: return "专业原片"
         case .livePhoto: return "实况照片"
         }
     }
@@ -97,10 +97,10 @@ struct CameraPreset: Identifiable, Hashable {
         case "LEICA": return "徕卡"
         case "HASSELBLAD": return "哈苏"
         case "ZEISS": return "蔡司"
-        case "VIVO": return "vivo"
+        case "VIVO": return "维沃"
         case "XIAOMI": return "小米"
         case "HUAWEI": return "华为"
-        case "OPPO": return "OPPO"
+        case "OPPO": return "欧珀"
         case "GOOGLE": return "谷歌 Pixel"
         case "APPLE": return "苹果"
         case "SONY": return "索尼"
@@ -392,6 +392,18 @@ final class CameraEngine: NSObject, ObservableObject {
 
     override init() {
         super.init()
+        UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+
+        orientationObserver = NotificationCenter.default.addObserver(
+            forName: UIDevice.orientationDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.updateCameraRotation()
+            }
+        }
+
         Task { await prepare() }
     }
 
@@ -452,6 +464,7 @@ final class CameraEngine: NSObject, ObservableObject {
         }
 
         session.commitConfiguration()
+        updateCameraRotation()
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             self?.session.startRunning()
@@ -474,6 +487,35 @@ final class CameraEngine: NSObject, ObservableObject {
             currentInput = input
         }
         session.commitConfiguration()
+        updateCameraRotation()
+    }
+
+    private func updateCameraRotation() {
+        let orientation = UIDevice.current.orientation
+        let angle: CGFloat
+
+        switch orientation {
+        case .portrait:
+            angle = 90
+        case .portraitUpsideDown:
+            angle = 270
+        case .landscapeLeft:
+            angle = 180
+        case .landscapeRight:
+            angle = 0
+        default:
+            angle = 90
+        }
+
+        if let videoConnection = videoOutput.connection(with: .video),
+           videoConnection.isVideoRotationAngleSupported(angle) {
+            videoConnection.videoRotationAngle = angle
+        }
+
+        if let photoConnection = photoOutput.connection(with: .video),
+           photoConnection.isVideoRotationAngleSupported(angle) {
+            photoConnection.videoRotationAngle = angle
+        }
     }
 
     func capture(preset: CameraPreset, mode: CaptureMode, watermark: Bool, metadata: MetadataDraft) {
@@ -786,19 +828,8 @@ final class LivePreviewView: MTKView, AVCaptureVideoDataOutputSampleBufferDelega
 
         guard let buffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
 
-        // 关键：不再把图像方向硬编码成“向右旋转 90°”。
-        // 直接按照设备方向动态决定，解决竖持手机取景横着的问题。
-        let deviceOrientation = UIDevice.current.orientation
-        let orientation: CGImagePropertyOrientation
-        switch deviceOrientation {
-        case .portrait: orientation = .left
-        case .portraitUpsideDown: orientation = .right
-        case .landscapeLeft: orientation = .up
-        case .landscapeRight: orientation = .down
-        default: orientation = .left
-        }
-
-        var source = CIImage(cvPixelBuffer: buffer).oriented(orientation)
+        // 方向由相机连接统一处理，避免取景层二次旋转。
+        var source = CIImage(cvPixelBuffer: buffer)
         let maxDimension = max(source.extent.width, source.extent.height)
         if maxDimension > 1280 {
             let scale = 1280 / maxDimension
@@ -1271,7 +1302,7 @@ struct ContentView: View {
     private var topBar: some View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 3) {
-                Text("GCam 风格相机")
+                Text("谷歌相机风格")
                     .font(.system(size: 16, weight: .bold))
                 Text("\(preset.displayBrand) · \(preset.model)")
                     .font(.system(size: 10, weight: .medium))
@@ -1354,7 +1385,7 @@ struct ContentView: View {
                         Button {
                             if let item = agcStore.imported.first { preset = item }
                         } label: {
-                            Text("已导入 AGC")
+                            Text("已导入配置")
                                 .font(.system(size: 11, weight: .bold))
                                 .padding(.horizontal, 11)
                                 .padding(.vertical, 8)
@@ -1405,7 +1436,7 @@ struct ContentView: View {
             .padding(.horizontal, 18)
 
             HStack {
-                Text(mode == .photo ? "实时风格 · 自动水印" : mode == .proRAW ? "保留原始 RAW · 生成风格照片" : "保留原始实况 · 生成风格照片")
+                Text(mode == .photo ? "实时风格 · 自动水印" : mode == .proRAW ? "保留专业原片 · 生成风格照片" : "保留原始实况 · 生成风格照片")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.white.opacity(0.78))
                 Spacer()
@@ -1425,7 +1456,7 @@ struct ContentView: View {
         case "LEICA": return "徕卡"
         case "HASSELBLAD": return "哈苏"
         case "ZEISS": return "蔡司"
-        case "VIVO": return "vivo"
+        case "VIVO": return "维沃"
         case "XIAOMI": return "小米"
         case "HUAWEI": return "华为"
         case "GOOGLE": return "谷歌"
@@ -1479,9 +1510,9 @@ struct ContentView: View {
     private var presetPicker: some View {
         NavigationStack {
             List {
-                Section("已导入的 AGC") {
+                Section("已导入的配置") {
                     if agcStore.imported.isEmpty {
-                        Text("还没有导入 AGC 配置。")
+                        Text("还没有导入配置文件。")
                             .foregroundStyle(.secondary)
                     } else {
                         ForEach(agcStore.imported) { item in
@@ -1549,15 +1580,15 @@ struct ContentView: View {
     private var settingsSheet: some View {
         NavigationStack {
             Form {
-                Section("AGC 配置") {
-                    Button("导入 AGC 文件") {
+                Section("配置文件") {
+                    Button("导入安卓配置文件") {
                         showSettings = false
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
                             showAGCImporter = true
                         }
                     }
 
-                    Text("AGC 是安卓 GCam 移植版使用的配置文件。本 App 会读取其中能映射到 iOS 的图像参数并生成对应预设。安卓专有的原生库、二进制算法和硬件接口不会在 iOS 上直接运行。")
+                    Text("这里用于导入安卓谷歌相机配置文件。应用会把能够对应到 iPhone 图像处理链的参数转换成当前配置；安卓专用算法库不会直接在 iPhone 上运行。")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
