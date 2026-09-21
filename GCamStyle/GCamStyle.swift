@@ -815,7 +815,13 @@ final class CameraEngine: NSObject, ObservableObject {
         }
     }
 
-    func capture(preset: CameraPreset, mode: CaptureMode, watermark: Bool, metadata: MetadataDraft) {
+    func capture(
+        preset: CameraPreset,
+        mode: CaptureMode,
+        watermark: Bool,
+        metadata: MetadataDraft,
+        watermarkConfig: CustomWatermarkConfig = CustomWatermarkConfig()
+    ) {
         guard ready, !isCapturing else { return }
         isCapturing = true
 
@@ -875,13 +881,20 @@ final class CameraEngine: NSObject, ObservableObject {
         errorMessage = nil
     }
 
-    func importPhoto(_ data: Data, preset: CameraPreset, watermark: Bool, metadata: MetadataDraft) {
+    func importPhoto(
+        _ data: Data,
+        preset: CameraPreset,
+        watermark: Bool,
+        metadata: MetadataDraft,
+        watermarkConfig: CustomWatermarkConfig = CustomWatermarkConfig()
+    ) {
         do {
             let url = try ExportService.renderToJPEG(
                 sourceData: data,
                 preset: preset,
                 watermark: watermark,
-                metadata: metadata
+                metadata: metadata,
+                watermarkConfig: watermarkConfig
             )
             let bytes = try Data(contentsOf: url)
             guard let image = UIImage(data: bytes) else { return }
@@ -897,14 +910,16 @@ final class CameraEngine: NSObject, ObservableObject {
         data: Data,
         preset: CameraPreset,
         watermark: Bool,
-        metadata: MetadataDraft
+        metadata: MetadataDraft,
+        watermarkConfig: CustomWatermarkConfig = CustomWatermarkConfig()
     ) {
         do {
             let url = try ExportService.renderToJPEG(
                 sourceData: data,
                 preset: preset,
                 watermark: watermark,
-                metadata: metadata
+                metadata: metadata,
+                watermarkConfig: watermarkConfig
             )
             let bytes = try Data(contentsOf: url)
             guard let image = UIImage(data: bytes) else { return }
@@ -992,7 +1007,7 @@ final class CameraEngine: NSObject, ObservableObject {
         do {
             try stillData.write(to: stillURL, options: .atomic)
             Task { await PhotoSaver.saveLivePhoto(stillURL: stillURL, movieURL: movieURL) }
-            showProcessedStill(data: stillData, preset: preset, watermark: watermark, metadata: metadata)
+            showProcessedStill(data: stillData, preset: preset, watermark: watermark, metadata: metadata, watermarkConfig: watermarkConfig)
         } catch {
             errorMessage = "实况照片保存失败：\(error.localizedDescription)"
         }
