@@ -54,8 +54,11 @@ jobs:
           APP="$RUNNER_TEMP/GCamDerivedData/Build/Products/Release-iphoneos/GCamStyle.app"
           test -d "$APP"
           test -f "$APP/GCamStyle"
-          /usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$APP/Info.plist"
-          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/Info.plist"
+          EXECUTABLE=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$APP/Info.plist")
+          IDENTIFIER=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/Info.plist")
+          test "$EXECUTABLE" = "GCamStyle"
+          test -f "$APP/$EXECUTABLE"
+          test "$IDENTIFIER" = "com.gcamstyle.ios"
           file "$APP/GCamStyle"
           /usr/bin/otool -hv "$APP/GCamStyle" | head -8
 
