@@ -323,7 +323,55 @@ struct CameraPreset: Identifiable, Hashable, Sendable {
     let exifMake: String
     let exifModel: String
     let watermarkLayout: WatermarkLayout
-    let agcProfile: AGCRenderProfile? = nil
+    let agcProfile: AGCRenderProfile?
+
+    init(
+        id: String,
+        brand: String,
+        model: String,
+        lens: String,
+        focal: String,
+        aperture: String,
+        iso: String,
+        shutter: String,
+        style: String,
+        exposure: Float,
+        saturation: Float,
+        contrast: Float,
+        highlights: Float,
+        shadows: Float,
+        sharpness: Float,
+        warmth: Float,
+        tint: Float,
+        channelBias: Float,
+        exifMake: String,
+        exifModel: String,
+        watermarkLayout: WatermarkLayout,
+        agcProfile: AGCRenderProfile? = nil
+    ) {
+        self.id = id
+        self.brand = brand
+        self.model = model
+        self.lens = lens
+        self.focal = focal
+        self.aperture = aperture
+        self.iso = iso
+        self.shutter = shutter
+        self.style = style
+        self.exposure = exposure
+        self.saturation = saturation
+        self.contrast = contrast
+        self.highlights = highlights
+        self.shadows = shadows
+        self.sharpness = sharpness
+        self.warmth = warmth
+        self.tint = tint
+        self.channelBias = channelBias
+        self.exifMake = exifMake
+        self.exifModel = exifModel
+        self.watermarkLayout = watermarkLayout
+        self.agcProfile = agcProfile
+    }
 
     var displayBrand: String {
         switch brand.uppercased() {
@@ -741,8 +789,8 @@ enum AGCMapper {
     }
 
     private static func curve(for config: AGCConfig, profile: Int, cameraIndex: Int = 0) -> (tone: [Float], gamma: [Float]) {
-        for custom in 1...10 {
-            for slot in 0...5 {
+        for customIndex in 1...10 {
+            for slotIndex in 0...5 {
                 let enabledKey = "lib_custom_(custom)_key_p(profile)_(slot)_enabled"
                 guard config.string(enabledKey) == "1" else { continue }
                 let title = config.string("lib_custom_(custom)_key_p(profile)_(slot)_title") ?? ""
@@ -1634,7 +1682,7 @@ enum PhotoProcessor {
             if let black = agc.blackLevel {
                 let lifted = CIFilter.colorControls()
                 lifted.inputImage = current
-                lifted.brightness = CGFloat(clampAGC(black))
+                lifted.brightness = clampAGC(black)
                 lifted.saturation = 1
                 lifted.contrast = 1
                 current = lifted.outputImage ?? current
