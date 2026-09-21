@@ -1585,11 +1585,25 @@ enum WatermarkRenderer {
             let infoFont = UIFont.monospacedSystemFont(ofSize: max(12, size.width / 94), weight: .medium)
             let accent = preset.watermarkAccent
 
-            let titleText = config.title.isEmpty ? "\(preset.brand)  \(preset.model)" : config.title
-            let subtitleText = config.subtitle.isEmpty
-                ? "\(preset.lens)   \(preset.focal)   \(preset.aperture)   \(preset.shutter)   \(preset.iso)"
-                : config.subtitle
-            let footerText = config.customFooter.isEmpty ? subtitleText : config.customFooter
+            let titleText: String
+            if !config.title.isEmpty {
+                titleText = config.title
+            } else if config.usePresetBrand {
+                titleText = "\(preset.brand)  \(preset.model)"
+            } else {
+                titleText = ""
+            }
+
+            let parameterText = "\(preset.lens)   \(preset.focal)   \(preset.aperture)   \(preset.shutter)   \(preset.iso)"
+            let subtitleText = config.subtitle.isEmpty ? parameterText : config.subtitle
+            let footerText: String
+            if !config.customFooter.isEmpty {
+                footerText = config.customFooter
+            } else if config.showParameters {
+                footerText = subtitleText
+            } else {
+                footerText = ""
+            }
 
             let opacity = CGFloat(min(0.95, max(0.15, config.opacity)))
             let selectedLayout: CustomWatermarkLayout
@@ -2424,6 +2438,7 @@ struct ContentView: View {
                 Section("自定义水印") {
                     TextField("水印主标题", text: $watermarkConfig.title)
                     TextField("水印副标题", text: $watermarkConfig.subtitle)
+                    TextField("水印底部文字", text: $watermarkConfig.customFooter)
                     Toggle("显示拍摄参数", isOn: $watermarkConfig.showParameters)
                     Toggle("使用当前机型名称", isOn: $watermarkConfig.usePresetBrand)
 
