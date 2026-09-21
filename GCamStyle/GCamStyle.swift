@@ -513,7 +513,7 @@ final class CameraEngine: NSObject, ObservableObject {
                 preset: preset,
                 metadata: exportMetadata,
                 watermark: false,
-                sourceProperties: rawFilter.properties.mapKeysToString()
+                sourceProperties: [:]
             ),
             let styledData = try? Data(contentsOf: styledURL),
             let image = UIImage(data: styledData) {
@@ -828,36 +828,42 @@ enum ExportService {
             ])
         }
 
+        let sourceProperties = (CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any]) ?? [:]
+        return try writeRenderedJPEG(
+            cgImage: styledCG,
+            preset: preset,
+            metadata: metadata,
+            watermark: watermark,
+            sourceProperties: sourceProperties
+        )
+    }
+
+    static func writeRenderedJPEG(
+        cgImage: CGImage,
+        preset: CameraPreset,
+        metadata: MetadataDraft,
+        watermark: Bool,
+        sourceProperties: [String: Any]
+    ) throws -> URL {
         let finalImage = watermark
-            ? WatermarkRenderer.draw(on: styledCG, preset: preset)
-            : styledCG
+            ? WatermarkRenderer.draw(on: cgImage, preset: preset).cgImage!
+            : cgImage
 
-        var properties = (CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any]) ?? [:]
-
+        var properties = sourceProperties
         var tiff = (properties[kCGImagePropertyTIFFDictionary as String] as? [String: Any]) ?? [:]
         tiff[kCGImagePropertyTIFFMake as String] = metadata.make.isEmpty ? preset.exifMake : metadata.make
         tiff[kCGImagePropertyTIFFModel as String] = metadata.model.isEmpty ? preset.exifModel : metadata.model
-        if !metadata.artist.isEmpty {
-            tiff[kCGImagePropertyTIFFArtist as String] = metadata.artist
-        }
-        if !metadata.copyright.isEmpty {
-            tiff[kCGImagePropertyTIFFCopyright as String] = metadata.copyright
-        }
+        if !metadata.artist.isEmpty { tiff[kCGImagePropertyTIFFArtist as String] = metadata.artist }
+        if !metadata.copyright.isEmpty { tiff[kCGImagePropertyTIFFCopyright as String] = metadata.copyright }
         tiff[kCGImagePropertyTIFFSoftware as String] = metadata.software
         properties[kCGImagePropertyTIFFDictionary as String] = tiff
 
         var exif = (properties[kCGImagePropertyExifDictionary as String] as? [String: Any]) ?? [:]
-        if !metadata.lens.isEmpty {
-            exif[kCGImagePropertyExifLensModel as String] = metadata.lens
-        }
+        if !metadata.lens.isEmpty { exif[kCGImagePropertyExifLensModel as String] = metadata.lens }
         exif[kCGImagePropertyExifFocalLength as String] = Double(preset.focal.replacingOccurrences(of: "mm", with: "")) ?? 28
         exif[kCGImagePropertyExifFNumber as String] = Double(preset.aperture.replacingOccurrences(of: "F", with: "")) ?? 1.8
-        exif[kCGImagePropertyExifISOSpeedRatings as String] = [
-            Int(preset.iso.replacingOccurrences(of: "ISO ", with: "")) ?? 100
-        ]
-        if !metadata.dateOriginal.isEmpty {
-            exif[kCGImagePropertyExifDateTimeOriginal as String] = metadata.dateOriginal
-        }
+        exif[kCGImagePropertyExifISOSpeedRatings as String] = [Int(preset.iso.replacingOccurrences(of: "ISO ", with: "")) ?? 100]
+        if !metadata.dateOriginal.isEmpty { exif[kCGImagePropertyExifDateTimeOriginal as String] = metadata.dateOriginal }
         properties[kCGImagePropertyExifDictionary as String] = exif
 
         if metadata.stripGPS {
@@ -873,20 +879,16 @@ enum ExportService {
             1,
             nil
         ) else {
-            throw NSError(domain: "GCamStyle", code: 3, userInfo: [
-                NSLocalizedDescriptionKey: "无法创建 JPEG"
-            ])
+            throw NSError(domain: "GCamStyle", code: 3, userInfo: [NSLocalizedDescriptionKey: "无法创建 JPEG"])
         }
 
         CGImageDestinationAddImage(destination, finalImage, properties as CFDictionary)
-
         guard CGImageDestinationFinalize(destination) else {
-            throw NSError(domain: "GCamStyle", code: 4, userInfo: [
-                NSLocalizedDescriptionKey: "JPEG 导出失败"
-            ])
+            throw NSError(domain: "GCamStyle", code: 4, userInfo: [NSLocalizedDescriptionKey: "JPEG 导出失败"])
         }
 
         return url
+    }
     }
 }
 
