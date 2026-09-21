@@ -1115,7 +1115,6 @@ final class CameraEngine: NSObject, ObservableObject {
 
     private var currentInput: AVCaptureDeviceInput?
     private var delegates: [Int64: CaptureProcessorDelegate] = [:]
-    private var orientationObserver: NSObjectProtocol?
 
     override init() {
         super.init()
@@ -1430,7 +1429,6 @@ final class CameraEngine: NSObject, ObservableObject {
         }
 
         settings.photoQualityPrioritization = .quality
-        settings.isHighResolutionPhotoEnabled = true
 
         if settings.flashMode != .off {
             settings.flashMode = isFlashEnabled ? .on : .off
@@ -1948,7 +1946,7 @@ enum PhotoProcessor {
             if gamma > 0 {
                 let ga = CIFilter.gammaAdjust()
                 ga.inputImage = current
-                ga.power = CGFloat(max(0.70, min(1.30, 1.0 + (gamma - 8.0) * 0.018)))
+                ga.power = max(0.70, min(1.30, 1.0 + (gamma - 8.0) * 0.018))
                 current = ga.outputImage ?? current
             }
         }
@@ -2007,7 +2005,7 @@ enum PhotoProcessor {
                 current = lifted.outputImage ?? current
             }
 
-            if let tone = agc.toneCurvePreset {
+            if let tone = agc.tonePreset {
                 current = applyTonePreset(current, preset: tone, amount: agc.tone)
             }
 
@@ -2695,7 +2693,7 @@ struct ContentView: View {
     @EnvironmentObject private var camera: CameraEngine
     @StateObject private var agcStore = AGCStore()
 
-    @State private var preset = PresetLibrary.all[0]
+    @State private var preset = AGCProfileLibrary.shadowChasing[0]
     @State private var mode: CaptureMode = .photo
     @State private var watermark = true
     @State private var metadata = MetadataDraft()
@@ -2962,6 +2960,30 @@ struct ContentView: View {
             }
 
             Button {
+                camera.isFlashEnabled.toggle()
+            } label: {
+                Image(systemName: camera.isFlashEnabled ? "bolt.fill" : "bolt.slash")
+                    .frame(width: 38, height: 38)
+                    .background(.ultraThinMaterial, in: Circle())
+            }
+
+            Button {
+                camera.isGridEnabled.toggle()
+            } label: {
+                Image(systemName: camera.isGridEnabled ? "grid" : "grid.circle")
+                    .frame(width: 38, height: 38)
+                    .background(.ultraThinMaterial, in: Circle())
+            }
+
+            Button {
+                camera.flipCamera()
+            } label: {
+                Image(systemName: "camera.rotate")
+                    .frame(width: 38, height: 38)
+                    .background(.ultraThinMaterial, in: Circle())
+            }
+
+            Button {
                 showSettings = true
             } label: {
                 HStack(spacing: 5) {
@@ -3058,453 +3080,24 @@ struct ContentView: View {
                 }
             }
 
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(PresetLibrary.brands, id: \.self) { brand in
-                        Button {
-                            if let item = PresetLibrary.all.first(where: { $0.brand == brand }) {
-                                preset = item
-                            }
-                        } label: {
-                            Text(itemBrandName(brand))
-                                .font(.system(size: 11, weight: .bold))
-                                .padding(.horizontal, 11)
-                                .padding(.vertical, 8)
-                                .background(
-                                    preset.brand == brand ? Color.white : Color.black.opacity(0.32),
-                                    in: Capsule()
-                                )
-                                .foregroundStyle(preset.brand == brand ? Color.black : Color.white)
-                        }
-                    }
-
-                    if !agcStore.imported.isEmpty {
-                        Button("全部配置") {
-                            showPresetPicker = true
-                        }
-                        .font(.system(size: 10, weight: .bold))
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 7)
-                        .background(.ultraThinMaterial, in: Capsule())
-                    }
+            HStack(spacing: 8) {
+                Text("当前风格：")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.65))
+                Text(preset.model)
+                    .font(.system(size: 10, weight: .bold))
+                    .lineLimit(1)
+                    .foregroundStyle(.white)
+                Spacer()
+                Button("全部风格") {
+                    showPresetPicker = true
                 }
-                .padding(.horizontal, 12)
+                .font(.system(size: 10, weight: .bold))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(.ultraThinMaterial, in: Capsule())
             }
+            .padding(.horizontal, 14)
 
             HStack {
-                PhotosPicker(selection: $selectedPhoto, matching: .images) {
-                    Image(systemName: "photo.on.rectangle")
-                        .font(.system(size: 19, weight: .semibold))
-                        .frame(width: 50, height: 50)
-                        .background(.ultraThinMaterial, in: Circle())
-                }
-
-                Spacer()
-
-                Button {
-                    UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
-                    camera.capture(
-                        preset: effectivePreset,
-                        mode: mode,
-                        watermark: watermark,
-                        metadata: metadata,
-                        watermarkConfig: watermarkConfig
-                    )
-                } label: {
-                    ZStack {
-                        Circle().fill(.white.opacity(0.22)).frame(width: 84, height: 84)
-                        Circle().fill(.white).frame(width: 68, height: 68)
-                    }
-                }
-                .disabled(!camera.ready || camera.isCapturing || camera.isProcessing)
-
-                Spacer()
-
-                Button {
-                    watermark.toggle()
-                } label: {
-                    Image(systemName: watermark ? "text.viewfinder" : "text.viewfinder.badge.magnifyingglass")
-                        .font(.system(size: 18, weight: .semibold))
-                        .frame(width: 50, height: 50)
-                        .background(.ultraThinMaterial, in: Circle())
-                }
-            }
-            .padding(.horizontal, 18)
-
-            HStack {
-                Text(mode == .photo ? "实时风格 · 自动水印" : mode == .proRAW ? "保留专业原片 · 生成风格照片" : "保留原始实况 · 生成风格照片")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.78))
-                Spacer()
-                Text("\(effectivePreset.focal) · \(effectivePreset.aperture)")
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.70))
-            }
-            .padding(.horizontal, 18)
-            .padding(.bottom, 12)
-        }
-        .padding(.top, 7)
-        .background(.black.opacity(0.24))
-    }
-
-    private func itemBrandName(_ brand: String) -> String {
-        switch brand.uppercased() {
-        case "LEICA": return "徕卡"
-        case "HASSELBLAD": return "哈苏"
-        case "ZEISS": return "蔡司"
-        case "VIVO": return "维沃"
-        case "XIAOMI": return "小米"
-        case "HUAWEI": return "华为"
-        case "GOOGLE": return "谷歌"
-        case "APPLE": return "苹果"
-        case "SONY": return "索尼"
-        case "CANON": return "佳能"
-        case "NIKON": return "尼康"
-        case "FUJIFILM": return "富士"
-        case "RICOH": return "理光"
-        case "PANASONIC": return "松下"
-        case "SIGMA": return "适马"
-        default: return brand
-        }
-    }
-
-    private func previewOverlay(_ image: UIImage) -> some View {
-        ZStack {
-            Color.black.opacity(0.88).ignoresSafeArea()
-
-            VStack(spacing: 14) {
-                HStack {
-                    Text("已生成")
-                        .font(.headline)
-                    Spacer()
-                    Button("关闭") { camera.clearPreview() }
-                }
-                .padding(.horizontal)
-
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFit()
-                    .clipShape(RoundedRectangle(cornerRadius: 24))
-                    .padding(.horizontal, 10)
-
-                HStack(spacing: 10) {
-                    Button("继续拍摄") { camera.clearPreview() }
-                        .buttonStyle(.borderedProminent)
-
-                    if let url = camera.lastSavedURL {
-                        ShareLink(item: url) {
-                            Label("分享", systemImage: "square.and.arrow.up")
-                        }
-                        .buttonStyle(.bordered)
-                    }
-                }
-            }
-            .padding(.top, 12)
-        }
-    }
-
-    private var presetPicker: some View {
-        NavigationStack {
-            List {
-                Section("已加载的安卓配置") {
-                    if !agcStore.imported.isEmpty {
-                        Text("已加载 \(agcStore.imported.count) 个配置档案")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    if agcStore.imported.isEmpty {
-                        Text("还没有导入配置文件。")
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(agcStore.imported) { item in
-                            Button {
-                                preset = item
-                                showPresetPicker = false
-                            } label: {
-                                presetRow(item)
-                            }
-                        }
-                    }
-
-                    Button {
-                        showPresetPicker = false
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                            showAGCImporter = true
-                        }
-                    } label: {
-                        Label("＋ 添加安卓配置文件", systemImage: "folder.badge.plus")
-                    }
-                    if !agcStore.imported.isEmpty {
-                        Button("清空已加载配置", role: .destructive) {
-                            agcStore.imported.removeAll()
-                            agcStore.sourceName = ""
-                            agcStore.enabled = false
-                            preset = PresetLibrary.all[0]
-                        }
-                    }
-                }
-
-                Section("内置 128 个风格") {
-                    ForEach(PresetLibrary.all) { item in
-                        Button {
-                            preset = item
-                            showPresetPicker = false
-                        } label: {
-                            presetRow(item)
-                        }
-                    }
-                }
-            }
-            .navigationTitle("相机 / 风格 / 配置")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("完成") { showPresetPicker = false }
-                }
-            }
-        }
-    }
-
-    private func presetRow(_ item: CameraPreset) -> some View {
-        HStack(spacing: 12) {
-            RoundedRectangle(cornerRadius: 5)
-                .fill(Color(item.watermarkAccent))
-                .frame(width: 6, height: 38)
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text("\(item.displayBrand)  \(item.model)")
-                    .font(.headline)
-                    .foregroundStyle(.primary)
-                Text("\(item.lens) · \(item.focal) · \(item.aperture)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Spacer()
-
-            if item.id == preset.id {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(.primary)
-            }
-        }
-    }
-
-    private var settingsSheet: some View {
-        NavigationStack {
-            Form {
-                Section("拍摄控制") {
-                    Toggle("网格线", isOn: $camera.isGridEnabled)
-
-                    Toggle(
-                        "闪光灯",
-                        isOn: Binding(
-                            get: { camera.isFlashEnabled },
-                            set: { camera.isFlashEnabled = $0 }
-                        )
-                    )
-
-                    Picker(
-                        "倒计时",
-                        selection: Binding(
-                            get: { camera.timerSeconds },
-                            set: { camera.timerSeconds = $0 }
-                        )
-                    ) {
-                        Text("关闭").tag(0)
-                        Text("3 秒").tag(3)
-                        Text("10 秒").tag(10)
-                    }
-
-                    Text("点击取景画面可自动对焦与测光；双指捏合或下方倍率按钮可以变焦。")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("曝光补偿")
-                        Slider(
-                            value: Binding(
-                                get: { Double(camera.exposureBias) },
-                                set: { camera.setExposureBias(Float($0)) }
-                            ),
-                            in: -2.0...2.0,
-                            step: 0.1
-                        )
-                    }
-                }
-
-                Section("安卓配置文件") {
-                    Toggle(
-                        "启用当前安卓配置",
-                        isOn: Binding(
-                            get: { agcStore.enabled },
-                            set: { enabled in
-                                agcStore.enabled = enabled
-                                if enabled, let item = agcStore.imported.first {
-                                    preset = item
-                                } else if preset.id.hasPrefix("agc-") {
-                                    preset = PresetLibrary.all[0]
-                                }
-                            }
-                        )
-                    )
-                    .disabled(agcStore.imported.isEmpty)
-
-                    if !agcStore.sourceName.isEmpty {
-                        Text("当前配置：\(agcStore.sourceName)")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    Button {
-                        showSettings = false
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                            showAGCImporter = true
-                        }
-                    } label: {
-                        Label("＋ 添加安卓配置文件", systemImage: "folder.badge.plus")
-                    }
-
-                    Text("支持直接选择 .agc 文件。每个文件里的多个配置档案都会加入列表。")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-
-                Section("水印") {
-                    Toggle("拍照后自动加水印", isOn: $watermark)
-
-                    Text("不同品牌使用不同布局：竖排、底栏、极简、右上角、分栏等，不再全部使用同一种模板。")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-
-                Section("自定义水印") {
-                    TextField("水印主标题", text: $watermarkConfig.title)
-                    TextField("水印副标题", text: $watermarkConfig.subtitle)
-                    TextField("水印底部文字", text: $watermarkConfig.customFooter)
-                    Toggle("显示拍摄参数", isOn: $watermarkConfig.showParameters)
-                    Toggle("使用当前机型名称", isOn: $watermarkConfig.usePresetBrand)
-
-                    Picker("水印版式", selection: $watermarkConfig.layout) {
-                        ForEach(CustomWatermarkLayout.allCases) { item in
-                            Text(item.title).tag(item)
-                        }
-                    }
-
-                    Picker("相框样式", selection: $watermarkConfig.frame) {
-                        ForEach(CustomFrameStyle.allCases) { item in
-                            Text(item.title).tag(item)
-                        }
-                    }
-
-                    Stepper(
-                        "相框宽度 \(Int(watermarkConfig.frameWidth))",
-                        value: $watermarkConfig.frameWidth,
-                        in: 2...40,
-                        step: 2
-                    )
-
-                    Slider(value: $watermarkConfig.opacity, in: 0.15...0.95) {
-                        Text("水印透明度")
-                    }
-
-                    Toggle("显示自定义标志", isOn: $watermarkConfig.showLogo)
-
-                    Button("加载自定义标志图片") {
-                        showLogoImporter = true
-                    }
-
-                    if watermarkConfig.logoData != nil {
-                        Button("移除自定义标志") {
-                            watermarkConfig.logoData = nil
-                        }
-                    }
-
-                    Stepper(
-                        "标志大小 \(Int(watermarkConfig.logoScale * 100))%",
-                        value: $watermarkConfig.logoScale,
-                        in: 0.08...0.40,
-                        step: 0.02
-                    )
-
-                    Button("恢复当前预设水印") {
-                        watermarkConfig = CustomWatermarkConfig()
-                    }
-                }
-
-                Section("色彩曲线") {
-                    if activeLUTName.isEmpty {
-                        Text("当前没有加载色彩曲线。")
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Text("当前：\(activeLUTName)")
-                            .foregroundStyle(.secondary)
-                    }
-
-                    Button("加载三维色彩曲线") {
-                        showLUTImporter = true
-                    }
-
-                    if !activeLUTName.isEmpty {
-                        Button("关闭当前色彩曲线") {
-                            LUTStore.shared.set(nil)
-                            activeLUTName = ""
-                        }
-                    }
-                }
-
-                Section("照片信息") {
-                    TextField("厂商", text: $metadata.make)
-                    TextField("机型", text: $metadata.model)
-                    TextField("镜头", text: $metadata.lens)
-                    TextField("摄影者", text: $metadata.artist)
-                    TextField("版权", text: $metadata.copyright)
-                    TextField("拍摄时间", text: $metadata.dateOriginal)
-                    Toggle("移除位置坐标", isOn: $metadata.stripGPS)
-
-                    Button("使用当前预设信息") {
-                        metadata.make = effectivePreset.exifMake
-                        metadata.model = effectivePreset.exifModel
-                        metadata.lens = effectivePreset.lens
-                    }
-
-                    Button("把机型写入水印标题") {
-                        watermarkConfig.title = metadata.model.isEmpty ? effectivePreset.exifModel : metadata.model
-                        watermarkConfig.usePresetBrand = false
-                    }
-                }
-
-                Section("说明") {
-                    Text("照片信息修改只作用于导出的照片；专业原片保持原始数据。")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .navigationTitle("设置")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("完成") { showSettings = false }
-                }
-            }
-        }
-    }
-}
-
-@MainActor
-final class AGCStore: ObservableObject {
-    @Published var imported: [CameraPreset] = AGCProfileLibrary.shadowChasing
-    @Published var enabled = true
-    @Published var sourceName = "影踪追寻_通用配置"
-}
-
-@main
-struct GCamStyleApp: App {
-    @StateObject private var camera = CameraEngine()
-
-    var body: some Scene {
-        WindowGroup {
-            ContentView()
-                .environmentObject(camera)
-                .preferredColorScheme(.dark)
-        }
-    }
-}
+                PhotosPicker
