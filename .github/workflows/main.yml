@@ -103,22 +103,35 @@ jobs:
       - name: Simulator smoke test
         run: |
           set -euxo pipefail
+
           SIM_RUNTIME=$(xcrun simctl list runtimes | awk -F '[()]' '/iOS 27\.0/ && /available/ {print $2; exit}')
           test -n "$SIM_RUNTIME"
+
           DEVICE_TYPE=$(xcrun simctl list devicetypes | awk -F '[()]' '/iPhone 17 Pro/ {print $2; exit}')
           test -n "$DEVICE_TYPE"
+
           UDID=$(xcrun simctl create GCamStyle-Smoke "$DEVICE_TYPE" "$SIM_RUNTIME")
           trap 'xcrun simctl shutdown "$UDID" || true; xcrun simctl delete "$UDID" || true' EXIT
+
           xcrun simctl boot "$UDID"
           xcrun simctl bootstatus "$UDID" -b
-          APP_SIM="$RUNNER_TEMP/GCamSimulator/Build/Products/Release-iphonesimulator/GCamStyle.app"
+
           rm -rf "$RUNNER_TEMP/GCamSimulator"
-          xcodebuild             -project GCamStyle.xcodeproj             -scheme GCamStyle             -configuration Debug             -sdk iphonesimulator             -derivedDataPath "$RUNNER_TEMP/GCamSimulator"             CODE_SIGNING_ALLOWED=NO             CODE_SIGNING_REQUIRED=NO             build
+          xcodebuild \
+            -project GCamStyle.xcodeproj \
+            -scheme GCamStyle \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination "id=$UDID" \
+            -derivedDataPath "$RUNNER_TEMP/GCamSimulator" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            build
+
+          APP_SIM="$RUNNER_TEMP/GCamSimulator/Build/Products/Debug-iphonesimulator/GCamStyle.app"
           test -d "$APP_SIM"
           xcrun simctl install "$UDID" "$APP_SIM"
-          xcrun simctl launch "$UDID" com.gcamstyle.ios >/tmp/gcamstyle-launch.txt
-          sleep 3
-          xcrun simctl spawn "$UDID" launchctl print system | grep -q GCamStyle || true
+          xcrun simctl launch "$UDID" com.gcamstyle.ios
 
       - name: Upload diagnostics
         if: always()
@@ -131,15 +144,13 @@ jobs:
           if-no-files-found: ignore
 
       - name: Upload unsigned IPA
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: GCamStyle-iOS-unsigned-IPA
           path: GCamStyle-iOS-unsigned.ipa
           if-no-files-found: error
 
       - name: Upload resignable IPA
-        uses: actions/upload-artifact@v4
-        with:
         uses: actions/upload-artifact@v7
         with:
           name: GCamStyle-iOS-resignable-IPA
