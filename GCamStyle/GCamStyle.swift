@@ -178,10 +178,94 @@ struct CustomWatermarkConfig: Hashable {
     var frame: CustomFrameStyle = .none
     var frameWidth: Double = 8
     var customFooter = ""
+    var logoData: Data? = nil
+    var logoScale: Double = 0.18
+    var showLogo: Bool = true
 
     var isCustomized: Bool {
         !title.isEmpty || !subtitle.isEmpty || !customFooter.isEmpty || !usePresetBrand ||
-        layout != .bottom || frame != .none || showParameters == false
+        layout != .bottom || frame != .none || showParameters == false ||
+        logoData != nil
+    }
+}
+
+struct LUT3D: Hashable {
+    let name: String
+    let dimension: Int
+    let cubeData: Data
+}
+
+enum LUT3DParser {
+    static func parse(_ data: Data, name: String) throws -> LUT3D {
+        guard let text = String(data: data, encoding: .utf8) else {
+            throw NSError(domain: "GCamStyleLUT", code: 1, userInfo: [NSLocalizedDescriptionKey: "无法读取色彩曲线文件。"])
+        }
+
+        var dimension: Int?
+        var values: [(Float, Float, Float)] = []
+
+        for rawLine in text.components(separatedBy: .newlines) {
+            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !line.isEmpty, !line.hasPrefix("#") else { continue }
+
+            let parts = line.split(whereSeparator: { $0 == " " || $0 == "\t" })
+            guard let first = parts.first else { continue }
+
+            if first.uppercased() == "LUT_3D_SIZE", parts.count >= 2 {
+                dimension = Int(parts[1])
+                continue
+            }
+
+            if parts.count >= 3,
+               let r = Float(parts[0]),
+               let g = Float(parts[1]),
+               let b = Float(parts[2]) {
+                values.append((r, g, b))
+            }
+        }
+
+        guard let size = dimension, (2...64).contains(size) else {
+            throw NSError(domain: "GCamStyleLUT", code: 2, userInfo: [NSLocalizedDescriptionKey: "色彩曲线文件缺少有效的三维尺寸。"])
+        }
+
+        let expected = size * size * size
+        guard values.count >= expected else {
+            throw NSError(domain: "GCamStyleLUT", code: 3, userInfo: [
+                NSLocalizedDescriptionKey: "色彩曲线数据不完整：需要 (expected) 个颜色点，实际只有 (values.count) 个。"
+            ])
+        }
+
+        var floats = [Float]()
+        floats.reserveCapacity(expected * 4)
+
+        for (r, g, b) in values.prefix(expected) {
+            floats.append(min(1, max(0, r)))
+            floats.append(min(1, max(0, g)))
+            floats.append(min(1, max(0, b)))
+            floats.append(1)
+        }
+
+        let cubeData = floats.withUnsafeBufferPointer { Data(buffer: $0) }
+        return LUT3D(name: name, dimension: size, cubeData: cubeData)
+    }
+}
+
+final class LUTStore {
+    static let shared = LUTStore()
+
+    private let lock = NSLock()
+    private var lut: LUT3D?
+
+    var current: LUT3D? {
+        lock.lock()
+        defer { lock.unlock() }
+        return lut
+    }
+
+    func set(_ lut: LUT3D?) {
+        lock.lock()
+        self.lut = lut
+        lock.unlock()
     }
 }
 
@@ -1242,7 +1326,11 @@ enum PhotoProcessor {
         controls.contrast = preset.contrast
         controls.brightness = 0
 
-        return controls.outputImage ?? input
+        var output = controls.outputImage ?? input
+        if let lut = LUTStore.shared.current {
+            output = applyLUT(output, lut: lut)
+        }
+        return output
     }
 
     static func applyLook(_ input: CIImage, preset: CameraPreset) -> CIImage {
@@ -1280,7 +1368,18 @@ enum PhotoProcessor {
         sharpen.sharpness = preset.sharpness
         current = sharpen.outputImage ?? current
 
+        if let lut = LUTStore.shared.current {
+            current = applyLUT(current, lut: lut)
+        }
         return current
+    }
+
+    private static func applyLUT(_ image: CIImage, lut: LUT3D) -> CIImage {
+        guard let filter = CIFilter(name: "CIColorCube") else { return image }
+        filter.setValue(image, forKey: kCIInputImageKey)
+        filter.setValue(lut.dimension, forKey: "inputCubeDimension")
+        filter.setValue(lut.cubeData, forKey: "inputCubeData")
+        return filter.outputImage ?? image
     }
 }
 
@@ -1687,6 +1786,9 @@ struct ContentView: View {
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var profile: GCamProfile = .natural
     @State private var watermarkConfig = CustomWatermarkConfig()
+    @State private var showLUTImporter = false
+    @State private var showLogoImporter = false
+    @State private var activeLUTName = ""
 
     private var effectivePreset: CameraPreset { profile.applying(to: preset) }
 
@@ -1755,6 +1857,40 @@ struct ContentView: View {
                 profile = .natural
             } catch {
                 camera.errorMessage = "安卓配置导入失败：\(error.localizedDescription)"
+            }
+        }
+        .fileImporter(
+            isPresented: $showLUTImporter,
+            allowedContentTypes: [UTType(filenameExtension: "cube") ?? .text, .text],
+            allowsMultipleSelection: false
+        ) { result in
+            do {
+                guard let url = try result.get().first else { return }
+                let access = url.startAccessingSecurityScopedResource()
+                defer { if access { url.stopAccessingSecurityScopedResource() } }
+                let lut = try LUT3DParser.parse(Data(contentsOf: url), name: url.deletingPathExtension().lastPathComponent)
+                LUTStore.shared.set(lut)
+                activeLUTName = lut.name
+            } catch {
+                camera.errorMessage = "色彩曲线加载失败：(error.localizedDescription)"
+            }
+        }
+        .fileImporter(
+            isPresented: $showLogoImporter,
+            allowedContentTypes: [.image],
+            allowsMultipleSelection: false
+        ) { result in
+            do {
+                guard let url = try result.get().first else { return }
+                let access = url.startAccessingSecurityScopedResource()
+                defer { if access { url.stopAccessingSecurityScopedResource() } }
+                let data = try Data(contentsOf: url)
+                guard UIImage(data: data) != nil else {
+                    throw NSError(domain: "GCamStyle", code: 5, userInfo: [NSLocalizedDescriptionKey: "图片格式无法读取。"])
+                }
+                watermarkConfig.logoData = data
+            } catch {
+                camera.errorMessage = "自定义标志加载失败：(error.localizedDescription)"
             }
         }
         .onChange(of: selectedPhoto) { _, item in
@@ -2131,12 +2267,52 @@ struct ContentView: View {
                         Text("水印透明度")
                     }
 
+                    Toggle("显示自定义标志", isOn: $watermarkConfig.showLogo)
+
+                    Button("加载自定义标志图片") {
+                        showLogoImporter = true
+                    }
+
+                    if watermarkConfig.logoData != nil {
+                        Button("移除自定义标志") {
+                            watermarkConfig.logoData = nil
+                        }
+                    }
+
+                    Stepper(
+                        "标志大小 (Int(watermarkConfig.logoScale * 100))%",
+                        value: $watermarkConfig.logoScale,
+                        in: 0.08...0.40,
+                        step: 0.02
+                    )
+
                     Button("恢复当前预设水印") {
                         watermarkConfig = CustomWatermarkConfig()
                     }
                 }
 
-                Section("EXIF") {
+                Section("色彩曲线") {
+                    if activeLUTName.isEmpty {
+                        Text("当前没有加载色彩曲线。")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("当前：(activeLUTName)")
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Button("加载三维色彩曲线") {
+                        showLUTImporter = true
+                    }
+
+                    if !activeLUTName.isEmpty {
+                        Button("关闭当前色彩曲线") {
+                            LUTStore.shared.set(nil)
+                            activeLUTName = ""
+                        }
+                    }
+                }
+
+                Section("照片信息") {
                     TextField("厂商", text: $metadata.make)
                     TextField("机型", text: $metadata.model)
                     TextField("镜头", text: $metadata.lens)
@@ -2158,7 +2334,7 @@ struct ContentView: View {
                 }
 
                 Section("说明") {
-                    Text("EXIF 修改只作用于导出的 JPEG。专业 RAW 原文件保持原始数据，不直接修改。")
+                    Text("照片信息修改只作用于导出的照片；专业原片保持原始数据。")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
