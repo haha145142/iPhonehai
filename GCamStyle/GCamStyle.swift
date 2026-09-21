@@ -708,11 +708,6 @@ enum AGCMapper {
             let warmth = clamp((r - b) * 8.0 + globalHue / 30.0, -12.0, 12.0)
             let tint = clamp((g - ((r + b) / 2.0)) * 6.0, -8.0, 8.0)
 
-            let frameCount =
-                config.profileInt("lib_pref_frame_count_key", profile: index) ??
-                config.profileInt("lib_pref_frame_count_zsl_key", profile: index) ??
-                config.profileInt("lib_pref_frame_count_ns_key", profile: index)
-
             let isoValue = config.profileValue("lib_iso_key", profile: index)
                 ?? config.string("pref_iso_key")
                 ?? "自动"
