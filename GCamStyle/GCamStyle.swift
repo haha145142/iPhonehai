@@ -693,20 +693,28 @@ enum AGCMapper {
 
             let sharp =
                 config.profileNumber("lib_sharp_gain_key", profile: index) ??
+                config.profileNumber("lib_sharpness_a_key", profile: index) ??
+                config.profileNumber("lib_gpu_sharpness_key", profile: index) ??
                 config.profileNumber("lib_sharp_gain_micro_key", profile: index) ??
                 config.profileNumber("lib_sharp_gain_macro_key", profile: index) ??
-                config.profileNumber("lib_luma_denoise_new_a", profile: index) ??
                 0.25
 
             let sharpness = clamp(sharp, 0.05, 1.0)
 
             let denoise =
+                config.profileNumber("lib_noise_reduction_adjust_key", profile: index) ??
+                config.profileNumber("lib_denoise_key", profile: index) ??
                 config.profileNumber("lib_denoise_smoothing_key", profile: index) ??
                 config.profileNumber("lib_smoothing_sabre_key", profile: index) ??
+                config.number("lib_noise_reduction_adjust_key") ??
                 0.0
 
             let warmth = clamp((r - b) * 8.0 + globalHue / 30.0, -12.0, 12.0)
-            let tint = clamp((g - ((r + b) / 2.0)) * 6.0, -8.0, 8.0)
+            let tint = clamp(
+                (g - ((r + b) / 2.0)) * 6.0 + (globalHue / 45.0),
+                -8.0,
+                8.0
+            )
 
             let isoValue = config.profileValue("lib_iso_key", profile: index)
                 ?? config.string("pref_iso_key")
@@ -1963,7 +1971,7 @@ struct ContentView: View {
         .fileImporter(
             isPresented: $showAGCImporter,
             allowedContentTypes: [
-                UTType(filenameExtension: "agc", conformingTo: .data) ?? .data,
+                .data,
                 .xml
             ],
             allowsMultipleSelection: true
@@ -2107,21 +2115,29 @@ struct ContentView: View {
             Button {
                 showPresetPicker = true
             } label: {
-                Image(systemName: "folder.badge.plus")
-                    .font(.system(size: 15, weight: .semibold))
-                    .frame(width: 40, height: 40)
-                    .background(.ultraThinMaterial, in: Circle())
-                    .overlay(Circle().stroke(.white.opacity(0.13)))
+                HStack(spacing: 5) {
+                    Image(systemName: "folder.badge.plus")
+                    Text("配置")
+                }
+                .font(.system(size: 11, weight: .semibold))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 9)
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay(Capsule().stroke(.white.opacity(0.13)))
             }
 
             Button {
                 showSettings = true
             } label: {
-                Image(systemName: "slider.horizontal.3")
-                    .font(.system(size: 15, weight: .semibold))
-                    .frame(width: 40, height: 40)
-                    .background(.ultraThinMaterial, in: Circle())
-                    .overlay(Circle().stroke(.white.opacity(0.13)))
+                HStack(spacing: 5) {
+                    Image(systemName: "slider.horizontal.3")
+                    Text("设置")
+                }
+                .font(.system(size: 11, weight: .semibold))
+                .padding(.horizontal, 11)
+                .padding(.vertical, 9)
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay(Capsule().stroke(.white.opacity(0.13)))
             }
         }
         .padding(.horizontal, 15)
@@ -2319,6 +2335,12 @@ struct ContentView: View {
         NavigationStack {
             List {
                 Section("已加载的安卓配置") {
+                    if !agcStore.imported.isEmpty {
+                        Text("已加载 (agcStore.imported.count) 个配置档案")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+
                     if agcStore.imported.isEmpty {
                         Text("还没有导入配置文件。")
                             .foregroundStyle(.secondary)
@@ -2340,6 +2362,15 @@ struct ContentView: View {
                         }
                     } label: {
                         Label("＋ 添加安卓配置文件", systemImage: "folder.badge.plus")
+                    }
+                    if !agcStore.imported.isEmpty {
+                        Button("清空已加载配置", role: .destructive) {
+                            agcStore.imported.removeAll()
+                            agcStore.sourceName = ""
+                            agcStore.enabled = false
+                            preset = PresetLibrary.all[0]
+                            profile = .natural
+                        }
                     }
                 }
 
@@ -2414,10 +2445,7 @@ struct ContentView: View {
                     }
 
                     Button {
-                        showSettings = false
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                            showAGCImporter = true
-                        }
+                        showAGCImporter = true
                     } label: {
                         Label("＋ 添加安卓配置文件", systemImage: "folder.badge.plus")
                     }
