@@ -803,6 +803,10 @@ final class CameraEngine: NSObject, ObservableObject {
     @Published var lastSavedURL: URL?
     @Published var proRAWSupported = false
     @Published var livePhotoSupported = false
+    @Published private(set) var previewRotationAngle: CGFloat = 0
+
+    private var rotationCoordinator: AVCaptureDevice.RotationCoordinator?
+    private var previewRotationObservation: NSKeyValueObservation?
 
     var currentPresetForPreview: CameraPreset = PresetLibrary.all[0]
 
@@ -812,19 +816,12 @@ final class CameraEngine: NSObject, ObservableObject {
 
     override init() {
         super.init()
-        UIDevice.current.beginGeneratingDeviceOrientationNotifications()
-
-        orientationObserver = NotificationCenter.default.addObserver(
-            forName: UIDevice.orientationDidChangeNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in
-                self?.updateCameraRotation()
-            }
-        }
-
         Task { await prepare() }
+    }
+
+    deinit {
+        previewRotationObservation?.invalidate()
+        NotificationCenter.default.removeObserver(self)
     }
 
     private func prepare() async {
@@ -855,6 +852,21 @@ final class CameraEngine: NSObject, ObservableObject {
             session.commitConfiguration()
             errorMessage = "找不到后置摄像头。"
             return
+        }
+
+        if #available(iOS 17.0, *) {
+            let coordinator = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: nil)
+            rotationCoordinator = coordinator
+            previewRotationAngle = coordinator.videoRotationAngleForHorizonLevelPreview
+            previewRotationObservation = coordinator.observe(
+                \AVCaptureDevice.RotationCoordinator.videoRotationAngleForHorizonLevelPreview,
+                options: [.initial, .new]
+            ) { [weak self] coordinator, _ in
+                let angle = coordinator.videoRotationAngleForHorizonLevelPreview
+                Task { @MainActor in
+                    self?.previewRotationAngle = angle
+                }
+            }
         }
 
         if session.canAddInput(input) {
@@ -911,30 +923,21 @@ final class CameraEngine: NSObject, ObservableObject {
     }
 
     private func updateCameraRotation() {
-        let orientation = UIDevice.current.orientation
-        let angle: CGFloat
+        let fallback: CGFloat = 0
+        let captureAngle = rotationCoordinator?.videoRotationAngleForHorizonLevelCapture ?? fallback
+        let previewAngle = rotationCoordinator?.videoRotationAngleForHorizonLevelPreview ?? fallback
+        previewRotationAngle = previewAngle
 
-        switch orientation {
-        case .portrait:
-            angle = 90
-        case .portraitUpsideDown:
-            angle = 270
-        case .landscapeLeft:
-            angle = 180
-        case .landscapeRight:
-            angle = 0
-        default:
-            angle = 90
-        }
-
+        // 自定义取景使用 AVCaptureVideoDataOutput；根据 Apple 的建议，
+        // 不在连接层旋转每一帧，而是在取景渲染层做旋转。
         if let videoConnection = videoOutput.connection(with: .video),
-           videoConnection.isVideoRotationAngleSupported(angle) {
-            videoConnection.videoRotationAngle = angle
+           videoConnection.isVideoRotationAngleSupported(0) {
+            videoConnection.videoRotationAngle = 0
         }
 
         if let photoConnection = photoOutput.connection(with: .video),
-           photoConnection.isVideoRotationAngleSupported(angle) {
-            photoConnection.videoRotationAngle = angle
+           photoConnection.isVideoRotationAngleSupported(captureAngle) {
+            photoConnection.videoRotationAngle = captureAngle
         }
     }
 
@@ -1339,6 +1342,7 @@ final class CaptureProcessorDelegate: NSObject, AVCapturePhotoCaptureDelegate {
 final class LivePreviewView: MTKView, AVCaptureVideoDataOutputSampleBufferDelegate {
     var activePreset: CameraPreset = PresetLibrary.all[0]
     var isFrozen = false
+    var rotationAngle: CGFloat = 0
 
     private let commandQueue: MTLCommandQueue
     private let ciContext: CIContext
@@ -1377,6 +1381,10 @@ final class LivePreviewView: MTKView, AVCaptureVideoDataOutputSampleBufferDelega
 
         // 方向由相机连接统一处理，避免取景层二次旋转。
         var source = CIImage(cvPixelBuffer: buffer)
+        if abs(rotationAngle) > 0.5 {
+            source = source.transformed(by: CGAffineTransform(rotationAngle: rotationAngle * .pi / 180.0))
+        }
+
         let maxDimension = max(source.extent.width, source.extent.height)
         if maxDimension > 1280 {
             let scale = 1280 / maxDimension
@@ -1427,11 +1435,13 @@ struct LiveCameraPreview: UIViewRepresentable {
     let output: AVCaptureVideoDataOutput
     let preset: CameraPreset
     let isFrozen: Bool
+    let rotationAngle: CGFloat
 
     func makeUIView(context: Context) -> LivePreviewView {
         let view = LivePreviewView()
         view.activePreset = preset
         view.isFrozen = isFrozen
+        view.rotationAngle = rotationAngle
         output.setSampleBufferDelegate(view, queue: DispatchQueue(label: "GCamStyle.preview", qos: .userInitiated))
         return view
     }
@@ -1439,6 +1449,7 @@ struct LiveCameraPreview: UIViewRepresentable {
     func updateUIView(_ uiView: LivePreviewView, context: Context) {
         uiView.activePreset = preset
         uiView.isFrozen = isFrozen
+        uiView.rotationAngle = rotationAngle
     }
 }
 
@@ -2377,7 +2388,7 @@ struct ContentView: View {
             List {
                 Section("已加载的安卓配置") {
                     if !agcStore.imported.isEmpty {
-                        Text("已加载 (agcStore.imported.count) 个配置档案")
+                        Text("已加载 \(agcStore.imported.count) 个配置档案")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
@@ -2589,7 +2600,7 @@ struct ContentView: View {
                     TextField("摄影者", text: $metadata.artist)
                     TextField("版权", text: $metadata.copyright)
                     TextField("拍摄时间", text: $metadata.dateOriginal)
-                    Toggle("移除 GPS", isOn: $metadata.stripGPS)
+                    Toggle("移除位置坐标", isOn: $metadata.stripGPS)
 
                     Button("使用当前预设信息") {
                         metadata.make = effectivePreset.exifMake
