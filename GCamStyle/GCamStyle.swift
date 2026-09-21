@@ -480,7 +480,7 @@ struct AGCConfig {
             ids.formUnion(0..<count)
         }
 
-        let pattern = #"^lib_profile_title_key_p(\\d+)_0$"#
+        let pattern = #"^lib_profile_title_key_p(\d+)_0$"#
         if let regex = try? NSRegularExpression(pattern: pattern) {
             for key in values.keys {
                 let ns = key as NSString
@@ -759,7 +759,9 @@ final class CameraEngine: NSObject, ObservableObject {
 
     @Published var ready = false
     @Published var isCapturing = false
+    @Published var isProcessing = false
     @Published var errorMessage: String?
+    private var processingCount = 0
     @Published var lastImage: UIImage?
     @Published var lastSavedURL: URL?
     @Published var proRAWSupported = false
@@ -906,7 +908,7 @@ final class CameraEngine: NSObject, ObservableObject {
         metadata: MetadataDraft,
         watermarkConfig: CustomWatermarkConfig = CustomWatermarkConfig()
     ) {
-        guard ready, !isCapturing else { return }
+        guard ready, !isCapturing, !isProcessing else { return }
         isCapturing = true
 
         let settings: AVCapturePhotoSettings
@@ -959,6 +961,16 @@ final class CameraEngine: NSObject, ObservableObject {
         photoOutput.capturePhoto(with: settings, delegate: delegate)
     }
 
+    private func beginProcessing() {
+        processingCount += 1
+        isProcessing = true
+    }
+
+    private func endProcessing() {
+        processingCount = max(0, processingCount - 1)
+        isProcessing = processingCount > 0
+    }
+
     func clearPreview() {
         lastImage = nil
         lastSavedURL = nil
@@ -972,21 +984,35 @@ final class CameraEngine: NSObject, ObservableObject {
         metadata: MetadataDraft,
         watermarkConfig: CustomWatermarkConfig = CustomWatermarkConfig()
     ) {
-        do {
-            let url = try ExportService.renderToJPEG(
-                sourceData: data,
-                preset: preset,
-                watermark: watermark,
-                metadata: metadata,
-                watermarkConfig: watermarkConfig
-            )
-            let bytes = try Data(contentsOf: url)
-            guard let image = UIImage(data: bytes) else { return }
-            lastImage = image
-            lastSavedURL = url
-            Task { await PhotoSaver.saveJPEG(url: url) }
-        } catch {
-            errorMessage = "照片处理失败：\(error.localizedDescription)"
+        beginProcessing()
+
+        Task {
+            let result = await Task.detached(priority: .userInitiated) {
+                Result {
+                    try ExportService.renderToJPEG(
+                        sourceData: data,
+                        preset: preset,
+                        watermark: watermark,
+                        metadata: metadata,
+                        watermarkConfig: watermarkConfig
+                    )
+                }
+            }.value
+
+            switch result {
+            case .success(let url):
+                do {
+                    self.lastImage = try PreviewImageFactory.makeThumbnail(from: url, maxPixel: 1600)
+                    self.lastSavedURL = url
+                    await PhotoSaver.saveJPEG(url: url)
+                } catch {
+                    self.errorMessage = "照片处理失败：\(error.localizedDescription)"
+                }
+            case .failure(let error):
+                self.errorMessage = "照片处理失败：\(error.localizedDescription)"
+            }
+
+            self.endProcessing()
         }
     }
 
@@ -997,21 +1023,35 @@ final class CameraEngine: NSObject, ObservableObject {
         metadata: MetadataDraft,
         watermarkConfig: CustomWatermarkConfig = CustomWatermarkConfig()
     ) {
-        do {
-            let url = try ExportService.renderToJPEG(
-                sourceData: data,
-                preset: preset,
-                watermark: watermark,
-                metadata: metadata,
-                watermarkConfig: watermarkConfig
-            )
-            let bytes = try Data(contentsOf: url)
-            guard let image = UIImage(data: bytes) else { return }
-            lastImage = image
-            lastSavedURL = url
-            Task { await PhotoSaver.saveJPEG(url: url) }
-        } catch {
-            errorMessage = "照片导出失败：\(error.localizedDescription)"
+        beginProcessing()
+
+        Task {
+            let result = await Task.detached(priority: .userInitiated) {
+                Result {
+                    try ExportService.renderToJPEG(
+                        sourceData: data,
+                        preset: preset,
+                        watermark: watermark,
+                        metadata: metadata,
+                        watermarkConfig: watermarkConfig
+                    )
+                }
+            }.value
+
+            switch result {
+            case .success(let url):
+                do {
+                    self.lastImage = try PreviewImageFactory.makeThumbnail(from: url, maxPixel: 1600)
+                    self.lastSavedURL = url
+                    await PhotoSaver.saveJPEG(url: url)
+                } catch {
+                    self.errorMessage = "照片预览生成失败：\(error.localizedDescription)"
+                }
+            case .failure(let error):
+                self.errorMessage = "照片导出失败：\(error.localizedDescription)"
+            }
+
+            self.endProcessing()
         }
     }
 
@@ -1026,60 +1066,73 @@ final class CameraEngine: NSObject, ObservableObject {
         metadata: MetadataDraft,
         watermarkConfig: CustomWatermarkConfig
     ) {
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("GCamStyle-RAW-\(UUID().uuidString).dng")
+        beginProcessing()
 
-        do {
-            try data.write(to: url, options: .atomic)
-            Task { await PhotoSaver.saveRAW(url: url) }
+        Task {
+            let result = await Task.detached(priority: .userInitiated) {
+                Result {
+                    let rawURL = FileManager.default.temporaryDirectory
+                        .appendingPathComponent("风格相机-原片-\(UUID().uuidString).dng")
+                    try data.write(to: rawURL, options: .atomic)
 
-            guard let rawFilter = CIRAWFilter(imageURL: url) else {
-                errorMessage = "专业 RAW 已保存，但本机 RAW 开发器无法继续处理。"
-                return
+                    guard let rawFilter = CIRAWFilter(imageURL: rawURL) else {
+                        throw NSError(domain: "GCamStyle", code: 30, userInfo: [
+                            NSLocalizedDescriptionKey: "原片已保存，但当前设备无法开发此原片。"
+                        ])
+                    }
+
+                    rawFilter.isDraftModeEnabled = false
+                    rawFilter.exposure = preset.exposure
+                    if rawFilter.isLensCorrectionSupported { rawFilter.isLensCorrectionEnabled = true }
+                    if rawFilter.isLuminanceNoiseReductionSupported { rawFilter.luminanceNoiseReductionAmount = 0.45 }
+                    if rawFilter.isColorNoiseReductionSupported { rawFilter.colorNoiseReductionAmount = 0.30 }
+                    if rawFilter.isSharpnessSupported {
+                        rawFilter.sharpnessAmount = min(1, max(0.05, preset.sharpness))
+                    }
+
+                    guard let rawImage = rawFilter.outputImage else {
+                        throw NSError(domain: "GCamStyle", code: 31, userInfo: [
+                            NSLocalizedDescriptionKey: "原片开发失败。"
+                        ])
+                    }
+
+                    let styled = PhotoProcessor.applyLook(rawImage, preset: preset)
+                    let context = CIContext()
+                    guard let cg = context.createCGImage(styled, from: styled.extent) else {
+                        throw NSError(domain: "GCamStyle", code: 32, userInfo: [
+                            NSLocalizedDescriptionKey: "原片风格渲染失败。"
+                        ])
+                    }
+
+                    let styledURL = try ExportService.writeRenderedJPEG(
+                        cgImage: cg,
+                        preset: preset,
+                        metadata: metadata,
+                        watermark: true,
+                        watermarkConfig: watermarkConfig,
+                        sourceProperties: [:]
+                    )
+
+                    return (rawURL, styledURL)
+                }
+            }.value
+
+            switch result {
+            case .success(let urls):
+                await PhotoSaver.saveRAW(url: urls.0)
+                await PhotoSaver.saveJPEG(url: urls.1)
+                do {
+                    self.lastImage = try PreviewImageFactory.makeThumbnail(from: urls.1, maxPixel: 1600)
+                    self.lastSavedURL = urls.1
+                    self.errorMessage = "原片和风格化照片都已保存。"
+                } catch {
+                    self.errorMessage = "原片已保存，但预览生成失败。"
+                }
+            case .failure(let error):
+                self.errorMessage = "原片处理失败：\(error.localizedDescription)"
             }
 
-            rawFilter.isDraftModeEnabled = false
-            rawFilter.exposure = preset.exposure
-            if rawFilter.isLensCorrectionSupported {
-                rawFilter.isLensCorrectionEnabled = true
-            }
-            if rawFilter.isLuminanceNoiseReductionSupported {
-                rawFilter.luminanceNoiseReductionAmount = 0.45
-            }
-            if rawFilter.isColorNoiseReductionSupported {
-                rawFilter.colorNoiseReductionAmount = 0.30
-            }
-            if rawFilter.isSharpnessSupported {
-                rawFilter.sharpnessAmount = min(1, max(0.05, preset.sharpness))
-            }
-
-            guard let rawImage = rawFilter.outputImage else {
-                errorMessage = "专业 RAW 开发失败。"
-                return
-            }
-
-            let styled = PhotoProcessor.applyLook(rawImage, preset: preset)
-            let context = CIContext()
-            guard let cg = context.createCGImage(styled, from: styled.extent) else { return }
-
-            let styledURL = try ExportService.writeRenderedJPEG(
-                cgImage: cg,
-                preset: preset,
-                metadata: metadata,
-                watermark: true,
-                watermarkConfig: watermarkConfig,
-                sourceProperties: [:]
-            )
-            let styledData = try Data(contentsOf: styledURL)
-
-            if let image = UIImage(data: styledData) {
-                lastImage = image
-                lastSavedURL = styledURL
-            }
-            Task { await PhotoSaver.saveJPEG(url: styledURL) }
-            errorMessage = "专业 RAW 原文件和风格化照片都已保存。"
-        } catch {
-            errorMessage = "专业 RAW 处理失败：\(error.localizedDescription)"
+            self.endProcessing()
         }
     }
 
@@ -1091,15 +1144,35 @@ final class CameraEngine: NSObject, ObservableObject {
         metadata: MetadataDraft,
         watermarkConfig: CustomWatermarkConfig
     ) {
-        let stillURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("GCamStyle-Live-\(UUID().uuidString).jpg")
+        beginProcessing()
 
-        do {
-            try stillData.write(to: stillURL, options: .atomic)
-            Task { await PhotoSaver.saveLivePhoto(stillURL: stillURL, movieURL: movieURL) }
-            showProcessedStill(data: stillData, preset: preset, watermark: watermark, metadata: metadata, watermarkConfig: watermarkConfig)
-        } catch {
-            errorMessage = "实况照片保存失败：\(error.localizedDescription)"
+        Task {
+            let result = await Task.detached(priority: .userInitiated) {
+                Result {
+                    try ExportService.renderToJPEG(
+                        sourceData: stillData,
+                        preset: preset,
+                        watermark: watermark,
+                        metadata: metadata,
+                        watermarkConfig: watermarkConfig
+                    )
+                }
+            }.value
+
+            switch result {
+            case .success(let styledURL):
+                await PhotoSaver.saveLivePhoto(stillURL: styledURL, movieURL: movieURL)
+                do {
+                    self.lastImage = try PreviewImageFactory.makeThumbnail(from: styledURL, maxPixel: 1600)
+                    self.lastSavedURL = styledURL
+                } catch {
+                    self.errorMessage = "实况照片已保存，但预览生成失败。"
+                }
+            case .failure(let error):
+                self.errorMessage = "实况照片处理失败：\(error.localizedDescription)"
+            }
+
+            self.endProcessing()
         }
     }
 }
@@ -1734,6 +1807,28 @@ enum FrameRenderer {
 
 // MARK: - 照片保存
 
+enum PreviewImageFactory {
+    static func makeThumbnail(from url: URL, maxPixel: Int) throws -> UIImage {
+        guard
+            let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+            let image = CGImageSourceCreateThumbnailAtIndex(
+                source,
+                0,
+                [
+                    kCGImageSourceCreateThumbnailFromImageAlways: true,
+                    kCGImageSourceThumbnailMaxPixelSize: maxPixel,
+                    kCGImageSourceCreateThumbnailWithTransform: true
+                ] as CFDictionary
+            )
+        else {
+            throw NSError(domain: "GCamStyle", code: 40, userInfo: [
+                NSLocalizedDescriptionKey: "无法生成照片预览。"
+            ])
+        }
+        return UIImage(cgImage: image)
+    }
+}
+
 enum PhotoSaver {
     static func requestPermission() async -> Bool {
         switch PHPhotoLibrary.authorizationStatus(for: .addOnly) {
@@ -1821,7 +1916,18 @@ struct ContentView: View {
                 bottomBar
             }
 
-            if let image = camera.lastImage {
+            if camera.isProcessing {
+                Color.black.opacity(0.42).ignoresSafeArea()
+                VStack(spacing: 10) {
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                        .tint(.white)
+                    Text("正在处理照片…")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(.white)
+                }
+                .allowsHitTesting(true)
+            } else if let image = camera.lastImage {
                 previewOverlay(image)
             }
         }
@@ -2057,7 +2163,7 @@ struct ContentView: View {
                         Circle().fill(.white).frame(width: 68, height: 68)
                     }
                 }
-                .disabled(!camera.ready || camera.isCapturing)
+                .disabled(!camera.ready || camera.isCapturing || camera.isProcessing)
 
                 Spacer()
 
@@ -2162,11 +2268,13 @@ struct ContentView: View {
                         }
                     }
 
-                    Button("加载安卓配置文件") {
+                    Button {
                         showPresetPicker = false
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
                             showAGCImporter = true
                         }
+                    } label: {
+                        Label("＋ 添加安卓配置文件", systemImage: "folder.badge.plus")
                     }
                 }
 
@@ -2218,14 +2326,25 @@ struct ContentView: View {
         NavigationStack {
             Form {
                 Section("安卓配置文件") {
-                    Button("加载安卓配置文件") {
+                    Toggle("启用当前安卓配置", isOn: $agcStore.enabled)
+                        .disabled(agcStore.imported.isEmpty)
+
+                    if !agcStore.sourceName.isEmpty {
+                        Text("当前：\(agcStore.sourceName)")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Button {
                         showSettings = false
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
                             showAGCImporter = true
                         }
+                    } label: {
+                        Label("＋ 添加安卓配置文件", systemImage: "folder.badge.plus")
                     }
 
-                    Text("这里用于导入安卓谷歌相机配置文件。应用会把能够对应到 iPhone 图像处理链的参数转换成当前配置；安卓专用算法库不会直接在 iPhone 上运行。")
+                    Text("支持直接选择 .agc 文件。每个文件里的多个配置档案都会加入列表。")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
