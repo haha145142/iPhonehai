@@ -4,16 +4,27 @@
 <dict>
 	<key>CFBundleDisplayName</key>
 	<string>GCam Style</string>
+	<key>CFBundleExecutable</key>
+	<string>GCamStyle</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.gcamstyle.ios</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
 	<key>CFBundleName</key>
 	<string>GCamStyle</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>2.0.0</string>
+	<string>2.0.1</string>
 	<key>CFBundleVersion</key>
-	<string>2</string>
+	<string>201</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>UIDeviceFamily</key>
+	<array>
+		<integer>1</integer>
+		<integer>2</integer>
+	</array>
 	<key>NSCameraUsageDescription</key>
 	<string>用于实时取景、拍摄照片和应用相机风格。</string>
 	<key>NSMicrophoneUsageDescription</key>
