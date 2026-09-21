@@ -1086,7 +1086,7 @@ enum AGCProfileLibrary {
         let highlights = Float(max(0.12, min(0.92, 0.84 - Double(d.hdrPlus) * 0.032)))
         let shadows = Float(max(0.06, min(0.82, 0.18 + abs(Double(d.hdrMinus)) * 0.065)))
         let contrast = Float(max(0.78, min(1.42, 0.94 + (d.tonePreset == 19 ? 0.07 : 0) + abs(Double(d.hdrMinus)) * 0.010)))
-        let sharp = Float(max(0.06, min(0.92, Double(d.sharp)))
+        let sharp = Float(max(0.06, min(0.92, Double(d.sharp))))
 
         let render = AGCRenderProfile(
             index: d.index,
