@@ -729,8 +729,6 @@ enum AGCMapper {
             default: layout = .bottomBand
             }
 
-            let suffix = frameCount.map { " · 合成 \(String($0)) 帧" } ?? ""
-
             return CameraPreset(
                 id: "agc-\(fileName)-p\(index)-\(UUID().uuidString)",
                 brand: brand,
@@ -1296,6 +1294,7 @@ final class CaptureProcessorDelegate: NSObject, AVCapturePhotoCaptureDelegate {
 
 final class LivePreviewView: MTKView, AVCaptureVideoDataOutputSampleBufferDelegate {
     var activePreset: CameraPreset = PresetLibrary.all[0]
+    var isFrozen = false
 
     private let commandQueue: MTLCommandQueue
     private let ciContext: CIContext
@@ -1324,6 +1323,8 @@ final class LivePreviewView: MTKView, AVCaptureVideoDataOutputSampleBufferDelega
         didOutput sampleBuffer: CMSampleBuffer,
         from connection: AVCaptureConnection
     ) {
+        guard !isFrozen else { return }
+
         let now = CACurrentMediaTime()
         guard now - lastSubmit > (1.0 / 18.0) else { return }
         lastSubmit = now
@@ -1381,16 +1382,19 @@ struct LiveCameraPreview: UIViewRepresentable {
     let session: AVCaptureSession
     let output: AVCaptureVideoDataOutput
     let preset: CameraPreset
+    let isFrozen: Bool
 
     func makeUIView(context: Context) -> LivePreviewView {
         let view = LivePreviewView()
         view.activePreset = preset
+        view.isFrozen = isFrozen
         output.setSampleBufferDelegate(view, queue: DispatchQueue(label: "GCamStyle.preview", qos: .userInitiated))
         return view
     }
 
     func updateUIView(_ uiView: LivePreviewView, context: Context) {
         uiView.activePreset = preset
+        uiView.isFrozen = isFrozen
     }
 }
 
@@ -1907,7 +1911,8 @@ struct ContentView: View {
             LiveCameraPreview(
                 session: camera.session,
                 output: camera.videoOutput,
-                preset: effectivePreset
+                preset: effectivePreset,
+                isFrozen: camera.isProcessing
             )
             .ignoresSafeArea()
 
@@ -1954,42 +1959,56 @@ struct ContentView: View {
             ],
             allowsMultipleSelection: true
         ) { result in
-            do {
-                let urls = try result.get()
+            switch result {
+            case .failure(let error):
+                camera.errorMessage = "安卓配置导入失败：\(error.localizedDescription)"
+            case .success(let urls):
                 guard !urls.isEmpty else { return }
 
-                var allImported: [CameraPreset] = []
-                var names: [String] = []
+                Task {
+                    let loaded = await Task.detached(priority: .userInitiated) {
+                        Result {
+                            var allImported: [CameraPreset] = []
+                            var names: [String] = []
 
-                for url in urls {
-                    let accessing = url.startAccessingSecurityScopedResource()
-                    defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+                            for url in urls {
+                                let accessing = url.startAccessingSecurityScopedResource()
+                                defer { if accessing { url.stopAccessingSecurityScopedResource() } }
 
-                    let data = try Data(contentsOf: url)
-                    let config = try AGCXMLParser().parse(data)
-                    let imported = AGCMapper.makePresets(from: config, fileName: url.lastPathComponent)
+                                let data = try Data(contentsOf: url)
+                                let config = try AGCXMLParser().parse(data)
+                                let imported = AGCMapper.makePresets(from: config, fileName: url.lastPathComponent)
 
-                    guard !imported.isEmpty else { continue }
-                    allImported.append(contentsOf: imported)
-                    names.append(url.deletingPathExtension().lastPathComponent)
+                                if !imported.isEmpty {
+                                    allImported.append(contentsOf: imported)
+                                    names.append(url.deletingPathExtension().lastPathComponent)
+                                }
+                            }
+
+                            guard !allImported.isEmpty else {
+                                throw NSError(
+                                    domain: "GCamStyleAGC",
+                                    code: 9,
+                                    userInfo: [NSLocalizedDescriptionKey: "没有识别出可用的安卓配置档案。"]
+                                )
+                            }
+
+                            return (allImported, names)
+                        }
+                    }.value
+
+                    switch loaded {
+                    case .success(let result):
+                        agcStore.imported.insert(contentsOf: result.0, at: 0)
+                        agcStore.sourceName = result.1.joined(separator: "、")
+                        agcStore.enabled = true
+                        preset = result.0[0]
+                        profile = .natural
+                        camera.errorMessage = "已加载 \(result.0.count) 个安卓配置档案。"
+                    case .failure(let error):
+                        camera.errorMessage = "安卓配置导入失败：\(error.localizedDescription)"
+                    }
                 }
-
-                guard !allImported.isEmpty else {
-                    throw NSError(
-                        domain: "GCamStyleAGC",
-                        code: 9,
-                        userInfo: [NSLocalizedDescriptionKey: "没有识别出可用的安卓配置档案。"]
-                    )
-                }
-
-                agcStore.imported.insert(contentsOf: allImported, at: 0)
-                agcStore.sourceName = names.joined(separator: "、")
-                agcStore.enabled = true
-                preset = allImported[0]
-                profile = .natural
-                camera.errorMessage = "已加载 (allImported.count) 个安卓配置档案。"
-            } catch {
-                camera.errorMessage = "安卓配置导入失败：\(error.localizedDescription)"
             }
         }
         .fileImporter(
@@ -2363,8 +2382,21 @@ struct ContentView: View {
         NavigationStack {
             Form {
                 Section("安卓配置文件") {
-                    Toggle("启用当前安卓配置", isOn: $agcStore.enabled)
-                        .disabled(agcStore.imported.isEmpty)
+                    Toggle(
+                        "启用当前安卓配置",
+                        isOn: Binding(
+                            get: { agcStore.enabled },
+                            set: { enabled in
+                                agcStore.enabled = enabled
+                                if enabled, let item = agcStore.imported.first {
+                                    preset = item
+                                } else if preset.id.hasPrefix("agc-") {
+                                    preset = PresetLibrary.all[0]
+                                }
+                            }
+                        )
+                    )
+                    .disabled(agcStore.imported.isEmpty)
 
                     if !agcStore.sourceName.isEmpty {
                         Text("当前：\(agcStore.sourceName)")
