@@ -1299,13 +1299,7 @@ final class CameraEngine: NSObject, ObservableObject {
         }
     }
 
-    private func captureNow(
-        preset: CameraPreset,
-        mode: CaptureMode,
-        watermark: Bool,
-        metadata: MetadataDraft,
-        watermarkConfig: CustomWatermarkConfig
-    ) {
+        func flipCamera() {
         guard let old = currentInput else { return }
         let position: AVCaptureDevice.Position = old.device.position == .back ? .front : .back
         guard
@@ -1375,9 +1369,7 @@ final class CameraEngine: NSObject, ObservableObject {
                 watermarkConfig: watermarkConfig
             )
         }
-    }
-
-    private func captureNow(
+    }private func captureNow(
         preset: CameraPreset,
         mode: CaptureMode,
         watermark: Bool,
