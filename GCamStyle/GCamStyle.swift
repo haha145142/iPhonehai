@@ -781,14 +781,14 @@ enum PhotoProcessor {
         let tint = CIFilter.temperatureAndTint()
         tint.inputImage = current
         tint.neutral = CIVector(x: 6500, y: 0)
-        tint.targetNeutral = CIVector(x: 6500 + preset.warmth * 90, y: preset.tint * 8)
+        tint.targetNeutral = CIVector(x: CGFloat(6500 + preset.warmth * 90), y: CGFloat(preset.tint * 8))
         current = tint.outputImage ?? current
 
         let matrix = CIFilter.colorMatrix()
         matrix.inputImage = current
         let bias = preset.channelBias * 0.004
-        matrix.rVector = CIVector(x: 1, y: bias, z: 0, w: 0)
-        matrix.gVector = CIVector(x: 0, y: 1, z: -bias, w: 0)
+        matrix.rVector = CIVector(x: 1, y: CGFloat(bias), z: 0, w: 0)
+        matrix.gVector = CIVector(x: 0, y: 1, z: CGFloat(-bias), w: 0)
         matrix.bVector = CIVector(x: 0, y: 0, z: 1, w: 0)
         matrix.aVector = CIVector(x: 0, y: 0, z: 0, w: 1)
         current = matrix.outputImage ?? current
