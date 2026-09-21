@@ -14,11 +14,18 @@ import CoreMedia
 // MARK: - Capture / editing models
 
 enum CaptureMode: String, CaseIterable, Identifiable {
-    case photo = "PHOTO"
-    case proRAW = "ProRAW"
-    case livePhoto = "LIVE"
+    case photo = "photo"
+    case proRAW = "proRAW"
+    case livePhoto = "livePhoto"
 
     var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .photo: return "照片"
+        case .proRAW: return "ProRAW"
+        case .livePhoto: return "实况"
+        }
+    }
 }
 
 struct MetadataDraft: Hashable {
@@ -669,6 +676,11 @@ final class LivePreviewView: MTKView, AVCaptureVideoDataOutputSampleBufferDelega
     private let commandQueue: MTLCommandQueue
     private let ciContext: CIContext
     private let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
+    private let frameLock = NSLock()
+    private var latestImage: CIImage?
+    private var lastSubmitTime: CFTimeInterval = 0
+    private var drawPending = false
+    private let maxPreviewDimension: CGFloat = 1280
 
     init(frame: CGRect = .zero) {
         let device = MTLCreateSystemDefaultDevice()!
@@ -695,23 +707,49 @@ final class LivePreviewView: MTKView, AVCaptureVideoDataOutputSampleBufferDelega
     ) {
         guard let imageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
 
-        let source = CIImage(cvPixelBuffer: imageBuffer)
-        let styled = PhotoProcessor.applyLook(source, preset: activePreset)
+        let now = CACurrentMediaTime()
+        guard now - lastSubmitTime >= (1.0 / 18.0) else { return }
+        lastSubmitTime = now
+
+        var source = CIImage(cvPixelBuffer: imageBuffer).oriented(.right)
+        let maxDimension = max(source.extent.width, source.extent.height)
+        if maxDimension > maxPreviewDimension {
+            let scale = maxPreviewDimension / maxDimension
+            source = source.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        }
+
+        // Live preview intentionally uses a much lighter pipeline than final export.
+        let styled = PhotoProcessor.applyPreviewLook(source, preset: activePreset)
+
+        frameLock.lock()
+        latestImage = styled
+        frameLock.unlock()
 
         DispatchQueue.main.async { [weak self] in
-            self?.render(image: styled)
+            guard let self else { return }
+            if self.drawPending { return }
+            self.drawPending = true
+            self.drawPending = false
+            self.draw()
         }
+    }
+
+    override func draw(_ rect: CGRect) {
+        frameLock.lock()
+        let image = latestImage
+        frameLock.unlock()
+        guard let image else { return }
+        render(image: image)
     }
 
     private func render(image: CIImage) {
         guard let drawable = currentDrawable else { return }
 
-        let oriented = image.oriented(.right)
         let target = CGSize(width: drawableSize.width, height: drawableSize.height)
-        let extent = oriented.extent
+        let extent = image.extent
 
         let scale = max(target.width / extent.width, target.height / extent.height)
-        var fitted = oriented.transformed(
+        var fitted = image.transformed(
             by: CGAffineTransform(scaleX: scale, y: scale)
         )
 
@@ -757,7 +795,29 @@ struct LiveCameraPreview: UIViewRepresentable {
 // MARK: - Image processing
 
 enum PhotoProcessor {
-    static func applyLook(_ input: CIImage, preset: CameraPreset) -> CIImage {
+    static func applyPreviewLook(_ input: CIImage, preset: CameraPreset) -> CIImage {
+        var current = input
+
+        let exposure = CIFilter.exposureAdjust()
+        exposure.inputImage = current
+        exposure.ev = preset.exposure
+        current = exposure.outputImage ?? current
+
+        let controls = CIFilter.colorControls()
+        controls.inputImage = current
+        controls.saturation = preset.saturation
+        controls.contrast = preset.contrast
+        controls.brightness = 0
+        current = controls.outputImage ?? current
+
+        let highlightShadow = CIFilter.highlightShadowAdjust()
+        highlightShadow.inputImage = current
+        highlightShadow.highlightAmount = preset.highlights
+        highlightShadow.shadowAmount = preset.shadows
+        return highlightShadow.outputImage ?? current
+    }
+
+    static func applyLook(_ input: CIImage, preset: CameraPreset) {
         var current = input
 
         let exposure = CIFilter.exposureAdjust()
@@ -1096,7 +1156,7 @@ struct ContentView: View {
     private var topBar: some View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("GCAM STYLE")
+                Text("GCam 风格相机")
                     .font(.system(size: 15, weight: .bold))
                     .tracking(1.3)
                 Text("\(preset.brand) · \(preset.model)")
@@ -1211,7 +1271,7 @@ struct ContentView: View {
             HStack(spacing: 7) {
                 Image(systemName: captureMode == .proRAW ? "camera.aperture" : "camera")
                     .font(.system(size: 10, weight: .bold))
-                Text(captureMode == .proRAW ? "RAW 保持原始 + 风格 JPEG" : "实时风格 · 自动水印")
+                Text(captureMode == .proRAW ? "RAW 保留原始 + 风格 JPEG" : "实时风格 · 自动水印")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.white.opacity(0.78))
 
