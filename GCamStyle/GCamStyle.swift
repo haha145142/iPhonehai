@@ -133,7 +133,7 @@ struct CameraPreset: Identifiable, Hashable {
 // 参数不是厂商内部算法，而是本 App 的可解释渲染参数。
 enum PresetLibrary {
     static let all: [CameraPreset] = {
-        let bases: [(String,String,String,String,String,String,String,String,Float,Float,Float,Float,Float,Float,Float,Float,String,String)] = [
+        let bases: [(String,String,String,String,String,String,String,String,Float,Float,Float,Float,Float,Float,Float,String,String)] = [
             ("LEICA","Q3","SUMMILUX 1:1.7/28 ASPH.","28mm","F1.7","ISO 100","1/250s", "徕卡经典", 0.92,1.08,0.92,0.10,0.28,0,0,"Leica Camera AG","LEICA Q3"),
             ("LEICA","Q3 43","APO-SUMMICRON 1:2/43 ASPH.","43mm","F2.0","ISO 100","1/250s", "徕卡 43", 0.93,1.08,0.94,0.08,0.25,0,0,"Leica Camera AG","LEICA Q3 43"),
             ("LEICA","M11","SUMMILUX-M 1:1.4/35 ASPH.","35mm","F1.4","ISO 64","1/500s", "徕卡 M", 0.92,1.10,0.92,0.09,0.30,0,0,"Leica Camera AG","LEICA M11"),
@@ -200,8 +200,8 @@ enum PresetLibrary {
                         warmth: b.14,
                         tint: b.15,
                         channelBias: 0,
-                        exifMake: b.16,
-                        exifModel: b.17,
+                        exifMake: b.15,
+                        exifModel: b.16,
                         watermarkLayout: WatermarkLayout.forBrand(b.0, style: v.0)
                     )
                 )
@@ -583,8 +583,7 @@ final class CameraEngine: NSObject, ObservableObject {
             try data.write(to: url, options: .atomic)
             Task { await PhotoSaver.saveRAW(url: url) }
 
-            guard let rawFilter = CIRAWFilter(imageURL: url),
-                  let rawImage = rawFilter.outputImage else {
+            guard let rawFilter = CIRAWFilter(imageURL: url) else {
                 errorMessage = "专业 RAW 已保存，但本机 RAW 开发器无法继续处理。"
                 return
             }
@@ -602,6 +601,11 @@ final class CameraEngine: NSObject, ObservableObject {
             }
             if rawFilter.isSharpnessSupported {
                 rawFilter.sharpnessAmount = min(1, max(0.05, preset.sharpness))
+            }
+
+            guard let rawImage = rawFilter.outputImage else {
+                errorMessage = "专业 RAW 开发失败。"
+                return
             }
 
             let styled = PhotoProcessor.applyLook(rawImage, preset: preset)
