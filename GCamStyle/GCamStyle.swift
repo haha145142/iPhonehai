@@ -292,6 +292,10 @@ struct AGCRenderProfile: Hashable, Sendable {
 
     let tonePreset: Int?
     let gammaPreset: Int?
+    let gammaCurvePreset: Int?
+    let sectCurvePreset: Int?
+    let tone: Float
+    let gamma: Float
     let lutIndex: Int?
 
     // 自定义 AGC 曲线的原始采样。
@@ -792,10 +796,10 @@ enum AGCMapper {
     private static func curve(for config: AGCConfig, profile: Int, cameraIndex: Int = 0) -> (tone: [Float], gamma: [Float]) {
         for customIndex in 1...10 {
             for slotIndex in 0...5 {
-                let enabledKey = "lib_custom_(custom)_key_p(profile)_(slot)_enabled"
+                let enabledKey = "lib_custom_\(customIndex)_key_p\(profile)_\(slotIndex)_enabled"
                 guard config.string(enabledKey) == "1" else { continue }
-                let title = config.string("lib_custom_(custom)_key_p(profile)_(slot)_title") ?? ""
-                let value = config.string("lib_custom_(custom)_key_p(profile)_(slot)_value") ?? ""
+                let title = config.string("lib_custom_\(customIndex)_key_p\(profile)_\(slotIndex)_title") ?? ""
+                let value = config.string("lib_custom_\(customIndex)_key_p\(profile)_\(slotIndex)_value") ?? ""
                 if !value.isEmpty {
                     return AGCCurveDecoder.decode(hex: value, title: title)
                 }
@@ -804,9 +808,9 @@ enum AGCMapper {
 
         // Some configs keep the active curve in a camera-specific slot.
         for slot in 0...5 {
-            let value = config.string("lib_custom_1_key_p(profile)_(slot)_value") ?? ""
+            let value = config.string("lib_custom_1_key_p\(profile)_\(slot)_value") ?? ""
             if !value.isEmpty {
-                let title = config.string("lib_custom_1_key_p(profile)_(slot)_title") ?? ""
+                let title = config.string("lib_custom_1_key_p\(profile)_\(slot)_title") ?? ""
                 return AGCCurveDecoder.decode(hex: value, title: title)
             }
         }
@@ -922,6 +926,10 @@ enum AGCMapper {
                 darkerExposure: darker.map(Float.init),
                 tonePreset: tonePreset,
                 gammaPreset: gammaPreset,
+                gammaCurvePreset: firstInt(config, ["lib_gamma_curve_preset_key"], profile: index),
+                sectCurvePreset: firstInt(config, ["lib_sect_curve_preset_key"], profile: index),
+                tone: Float(tone),
+                gamma: Float(gamma),
                 lutIndex: lutIndex,
                 toneCurve: curves.tone,
                 gammaCurve: curves.gamma
@@ -973,6 +981,8 @@ struct AGCProfileDefinition: Sendable {
     let index: Int
     let title: String
     let toneCurvePreset: Int?
+    let gammaCurvePreset: Int?
+    let sectCurvePreset: Int?
     let tone: Float
     let gamma: Float
     let saturation: Float
@@ -992,24 +1002,24 @@ struct AGCProfileDefinition: Sendable {
 
 enum AGCProfileLibrary {
     private static let definitions: [AGCProfileDefinition] = [
-        .init(index: 0, title: "标准低噪 🖼", toneCurvePreset: 8, tone: 15, gamma: 8, saturation: 1.00, red: 1.00, green: 1.00, blue: 1.00, hdrPlus: 5.0, hdrMinus: -3.0, denoise: 0.875, sharp: 0.4375, frameCount: 20, zslFrameCount: 50, nsFrameCount: 28, noiseModelEnabled: true, lutIndex: 0),
-        .init(index: 1, title: "柔和细节 🍄", toneCurvePreset: 19, tone: 23, gamma: 11, saturation: 1.00, red: 1.00, green: 1.00, blue: 1.00, hdrPlus: 13.5, hdrMinus: -1.25, denoise: 0.75, sharp: 0.30, frameCount: 28, zslFrameCount: 50, nsFrameCount: 28, noiseModelEnabled: false, lutIndex: 0),
-        .init(index: 2, title: "亮丽HDR 🌅", toneCurvePreset: 19, tone: 14, gamma: 7, saturation: 1.00, red: 1.00, green: 1.00, blue: 1.00, hdrPlus: 14.5, hdrMinus: -3.5, denoise: 0.65, sharp: 0.30, frameCount: 50, zslFrameCount: 50, nsFrameCount: 28, noiseModelEnabled: true, lutIndex: 0),
-        .init(index: 3, title: "夜色花火 🎆", toneCurvePreset: 2, tone: 10, gamma: 9, saturation: 1.00, red: 1.00, green: 1.00, blue: 1.00, hdrPlus: 11.0, hdrMinus: -4.0, denoise: 0.80, sharp: 0.375, frameCount: 35, zslFrameCount: 50, nsFrameCount: 28, noiseModelEnabled: true, lutIndex: 0),
-        .init(index: 4, title: "数码CCD 📸", toneCurvePreset: 8, tone: 8, gamma: 3, saturation: 1.15, red: 1.04, green: 1.06, blue: 1.26, hdrPlus: 15.0, hdrMinus: -0.875, denoise: 0.75, sharp: 0.50, frameCount: 50, zslFrameCount: 50, nsFrameCount: 28, noiseModelEnabled: false, lutIndex: 0),
-        .init(index: 5, title: "运动抓拍 🚴‍♂️", toneCurvePreset: 8, tone: 32, gamma: 11, saturation: 1.00, red: 0.92, green: 1.02, blue: 1.00, hdrPlus: 14.5, hdrMinus: -2.0, denoise: 0.50, sharp: 0.125, frameCount: 5, zslFrameCount: 7, nsFrameCount: 5, noiseModelEnabled: false, lutIndex: 0),
-        .init(index: 6, title: "鲜艳徕卡 🌈", toneCurvePreset: 8, tone: 16, gamma: 8, saturation: 1.10, red: 1.02, green: 1.00, blue: 0.96, hdrPlus: 14.5, hdrMinus: -1.25, denoise: 0.50, sharp: 0.50, frameCount: 50, zslFrameCount: 50, nsFrameCount: 28, noiseModelEnabled: true, lutIndex: 0),
-        .init(index: 7, title: "复古徕卡 📽", toneCurvePreset: 19, tone: 17, gamma: 8, saturation: 0.90, red: 1.04, green: 1.02, blue: 1.04, hdrPlus: 3.5, hdrMinus: -2.0, denoise: 0.50, sharp: 0.34, frameCount: 24, zslFrameCount: 40, nsFrameCount: 24, noiseModelEnabled: false, lutIndex: 0),
-        .init(index: 8, title: "金属徕卡 ⚓️", toneCurvePreset: 2, tone: 2, gamma: 3, saturation: 1.00, red: 1.08, green: 1.00, blue: 0.92, hdrPlus: 10.5, hdrMinus: -0.25, denoise: 0.875, sharp: 0.50, frameCount: 40, zslFrameCount: 50, nsFrameCount: 28, noiseModelEnabled: true, lutIndex: 0),
-        .init(index: 9, title: "糖果轻颜 🧝‍♀️", toneCurvePreset: 2, tone: 2, gamma: 11, saturation: 1.15, red: 0.94, green: 1.16, blue: 1.12, hdrPlus: 7.0, hdrMinus: -1.75, denoise: 0.62, sharp: 0.50, frameCount: 28, zslFrameCount: 12, nsFrameCount: 28, noiseModelEnabled: true, lutIndex: 0),
-        .init(index: 10, title: "普罗维亚 🌆", toneCurvePreset: 19, tone: 2, gamma: 8, saturation: 0.85, red: 1.32, green: 1.32, blue: 1.08, hdrPlus: 7.0, hdrMinus: -1.5, denoise: 0.50, sharp: 0.30, frameCount: 32, zslFrameCount: 32, nsFrameCount: 24, noiseModelEnabled: false, lutIndex: 0),
-        .init(index: 11, title: "浪漫电影 🎊", toneCurvePreset: 8, tone: 28, gamma: 7, saturation: 1.06, red: 1.06, green: 0.84, blue: 0.74, hdrPlus: 14.5, hdrMinus: -1.5, denoise: 0.55, sharp: 0.30, frameCount: 35, zslFrameCount: 50, nsFrameCount: 28, noiseModelEnabled: false, lutIndex: 0),
-        .init(index: 12, title: "暗调负片 🎞", toneCurvePreset: 19, tone: 18, gamma: 9, saturation: 0.75, red: 0.98, green: 0.80, blue: 1.18, hdrPlus: 10.5, hdrMinus: 1.25, denoise: 0.50, sharp: 0.30, frameCount: 32, zslFrameCount: 40, nsFrameCount: 28, noiseModelEnabled: false, lutIndex: 0),
-        .init(index: 13, title: "柯达多彩 🌸", toneCurvePreset: 19, tone: 20, gamma: 8, saturation: 1.00, red: 0.80, green: 1.00, blue: 0.80, hdrPlus: 3.5, hdrMinus: -9.0, denoise: 0.50, sharp: 0.30, frameCount: 30, zslFrameCount: 40, nsFrameCount: 24, noiseModelEnabled: false, lutIndex: 0),
-        .init(index: 14, title: "日光胶片 ☀️", toneCurvePreset: 19, tone: 17, gamma: 8, saturation: 0.75, red: 0.94, green: 1.16, blue: 1.14, hdrPlus: 16.0, hdrMinus: -0.625, denoise: 0.50, sharp: 0.20, frameCount: 32, zslFrameCount: 40, nsFrameCount: 24, noiseModelEnabled: false, lutIndex: 0),
-        .init(index: 15, title: "LUT+超细节", toneCurvePreset: 19, tone: 18, gamma: 8, saturation: 1.00, red: 1.00, green: 1.00, blue: 1.00, hdrPlus: 5.5, hdrMinus: -1.5, denoise: 0.50, sharp: 0.50, frameCount: 50, zslFrameCount: 50, nsFrameCount: 28, noiseModelEnabled: false, lutIndex: 0),
-        .init(index: 16, title: "LUT+低动态", toneCurvePreset: 19, tone: 15, gamma: 8, saturation: 0.90, red: 1.00, green: 1.00, blue: 1.00, hdrPlus: 6.5, hdrMinus: -0.375, denoise: 0.875, sharp: 0.50, frameCount: 40, zslFrameCount: 40, nsFrameCount: 24, noiseModelEnabled: false, lutIndex: 0),
-        .init(index: 17, title: "LUT+高动态", toneCurvePreset: 19, tone: 22, gamma: 1, saturation: 1.15, red: 1.00, green: 1.00, blue: 1.00, hdrPlus: 6.0, hdrMinus: -2.0, denoise: 0.875, sharp: 0.375, frameCount: 40, zslFrameCount: 40, nsFrameCount: 24, noiseModelEnabled: false, lutIndex: 0)
+        .init(index: 0, title: "标准低噪 🖼", toneCurvePreset: 8, gammaCurvePreset: 3, sectCurvePreset: 3, tone: 15, gamma: 8, saturation: 1.00, red: 1.00, green: 1.00, blue: 1.00, hdrPlus: 5.0, hdrMinus: -3.0, denoise: 0.875, sharp: 0.4375, frameCount: 20, zslFrameCount: 50, nsFrameCount: 28, noiseModelEnabled: true, lutIndex: 0),
+        .init(index: 1, title: "柔和细节 🍄", toneCurvePreset: 19, gammaCurvePreset: 7, sectCurvePreset: 2, tone: 23, gamma: 11, saturation: 1.00, red: 1.00, green: 1.00, blue: 1.00, hdrPlus: 13.5, hdrMinus: -1.25, denoise: 0.75, sharp: 0.30, frameCount: 28, zslFrameCount: 50, nsFrameCount: 28, noiseModelEnabled: false, lutIndex: 0),
+        .init(index: 2, title: "亮丽HDR 🌅", toneCurvePreset: nil, gammaCurvePreset: 7, sectCurvePreset: 3, tone: 14, gamma: 7, saturation: 1.00, red: 1.00, green: 1.00, blue: 1.00, hdrPlus: 14.5, hdrMinus: -3.5, denoise: 0.65, sharp: 0.30, frameCount: 50, zslFrameCount: 50, nsFrameCount: 28, noiseModelEnabled: true, lutIndex: 0),
+        .init(index: 3, title: "夜色花火 🎆", toneCurvePreset: nil, gammaCurvePreset: nil, sectCurvePreset: nil, tone: 10, gamma: 9, saturation: 1.00, red: 1.00, green: 1.00, blue: 1.00, hdrPlus: 11.0, hdrMinus: -4.0, denoise: 0.80, sharp: 0.375, frameCount: 35, zslFrameCount: 50, nsFrameCount: 28, noiseModelEnabled: true, lutIndex: 0),
+        .init(index: 4, title: "数码CCD 📸", toneCurvePreset: 8, gammaCurvePreset: 3, sectCurvePreset: nil, tone: 8, gamma: 3, saturation: 1.15, red: 1.04, green: 1.06, blue: 1.26, hdrPlus: 15.0, hdrMinus: -0.875, denoise: 0.75, sharp: 0.50, frameCount: 50, zslFrameCount: 50, nsFrameCount: 28, noiseModelEnabled: false, lutIndex: 0),
+        .init(index: 5, title: "运动抓拍 🚴‍♂️", toneCurvePreset: 8, gammaCurvePreset: 3, sectCurvePreset: 3, tone: 32, gamma: 11, saturation: 1.00, red: 0.92, green: 1.02, blue: 1.00, hdrPlus: 14.5, hdrMinus: -2.0, denoise: 0.50, sharp: 0.125, frameCount: 5, zslFrameCount: 7, nsFrameCount: 5, noiseModelEnabled: false, lutIndex: 0),
+        .init(index: 6, title: "鲜艳徕卡 🌈", toneCurvePreset: 8, gammaCurvePreset: 3, sectCurvePreset: 3, tone: 16, gamma: 8, saturation: 1.10, red: 1.02, green: 1.00, blue: 0.96, hdrPlus: 14.5, hdrMinus: -1.25, denoise: 0.50, sharp: 0.50, frameCount: 50, zslFrameCount: 50, nsFrameCount: 28, noiseModelEnabled: true, lutIndex: 0),
+        .init(index: 7, title: "复古徕卡 📽", toneCurvePreset: 19, gammaCurvePreset: 7, sectCurvePreset: 2, tone: 17, gamma: 8, saturation: 0.90, red: 1.04, green: 1.02, blue: 1.04, hdrPlus: 3.5, hdrMinus: -2.0, denoise: 0.50, sharp: 0.34, frameCount: 24, zslFrameCount: 40, nsFrameCount: 24, noiseModelEnabled: false, lutIndex: 0),
+        .init(index: 8, title: "金属徕卡 ⚓️", toneCurvePreset: nil, gammaCurvePreset: nil, sectCurvePreset: nil, tone: 2, gamma: 3, saturation: 1.00, red: 1.08, green: 1.00, blue: 0.92, hdrPlus: 10.5, hdrMinus: -0.25, denoise: 0.875, sharp: 0.50, frameCount: 40, zslFrameCount: 50, nsFrameCount: 28, noiseModelEnabled: true, lutIndex: 0),
+        .init(index: 9, title: "糖果轻颜 🧝‍♀️", toneCurvePreset: nil, gammaCurvePreset: 7, sectCurvePreset: 3, tone: 2, gamma: 11, saturation: 1.15, red: 0.94, green: 1.16, blue: 1.12, hdrPlus: 7.0, hdrMinus: -1.75, denoise: 0.62, sharp: 0.50, frameCount: 28, zslFrameCount: 12, nsFrameCount: 28, noiseModelEnabled: true, lutIndex: 0),
+        .init(index: 10, title: "普罗维亚 🌆", toneCurvePreset: 19, gammaCurvePreset: 7, sectCurvePreset: 2, tone: 2, gamma: 8, saturation: 0.85, red: 1.32, green: 1.32, blue: 1.08, hdrPlus: 7.0, hdrMinus: -1.5, denoise: 0.50, sharp: 0.30, frameCount: 32, zslFrameCount: 32, nsFrameCount: 24, noiseModelEnabled: false, lutIndex: 0),
+        .init(index: 11, title: "浪漫电影 🎊", toneCurvePreset: 8, gammaCurvePreset: 3, sectCurvePreset: nil, tone: 28, gamma: 7, saturation: 1.06, red: 1.06, green: 0.84, blue: 0.74, hdrPlus: 14.5, hdrMinus: -1.5, denoise: 0.55, sharp: 0.30, frameCount: 35, zslFrameCount: 50, nsFrameCount: 28, noiseModelEnabled: false, lutIndex: 0),
+        .init(index: 12, title: "暗调负片 🎞", toneCurvePreset: 19, gammaCurvePreset: 7, sectCurvePreset: 2, tone: 18, gamma: 9, saturation: 0.75, red: 0.98, green: 0.80, blue: 1.18, hdrPlus: 10.5, hdrMinus: 1.25, denoise: 0.50, sharp: 0.30, frameCount: 32, zslFrameCount: 40, nsFrameCount: 28, noiseModelEnabled: false, lutIndex: 0),
+        .init(index: 13, title: "柯达多彩 🌸", toneCurvePreset: 19, gammaCurvePreset: 7, sectCurvePreset: 2, tone: 20, gamma: 8, saturation: 1.00, red: 0.80, green: 1.00, blue: 0.80, hdrPlus: 3.5, hdrMinus: -9.0, denoise: 0.50, sharp: 0.30, frameCount: 30, zslFrameCount: 40, nsFrameCount: 24, noiseModelEnabled: false, lutIndex: 0),
+        .init(index: 14, title: "日光胶片 ☀️", toneCurvePreset: 19, gammaCurvePreset: 7, sectCurvePreset: 2, tone: 17, gamma: 8, saturation: 0.75, red: 0.94, green: 1.16, blue: 1.14, hdrPlus: 16.0, hdrMinus: -0.625, denoise: 0.50, sharp: 0.20, frameCount: 32, zslFrameCount: 40, nsFrameCount: 24, noiseModelEnabled: false, lutIndex: 0),
+        .init(index: 15, title: "LUT+超细节", toneCurvePreset: 19, gammaCurvePreset: 7, sectCurvePreset: 2, tone: 18, gamma: 8, saturation: 1.00, red: 1.00, green: 1.00, blue: 1.00, hdrPlus: 5.5, hdrMinus: -1.5, denoise: 0.50, sharp: 0.50, frameCount: 50, zslFrameCount: 50, nsFrameCount: 28, noiseModelEnabled: false, lutIndex: 0),
+        .init(index: 16, title: "LUT+低动态", toneCurvePreset: 19, gammaCurvePreset: 7, sectCurvePreset: 2, tone: 15, gamma: 8, saturation: 0.90, red: 1.00, green: 1.00, blue: 1.00, hdrPlus: 6.5, hdrMinus: -0.375, denoise: 0.875, sharp: 0.50, frameCount: 40, zslFrameCount: 40, nsFrameCount: 24, noiseModelEnabled: false, lutIndex: 0),
+        .init(index: 17, title: "LUT+高动态", toneCurvePreset: 19, gammaCurvePreset: 7, sectCurvePreset: 2, tone: 22, gamma: 1, saturation: 1.15, red: 1.00, green: 1.00, blue: 1.00, hdrPlus: 6.0, hdrMinus: -2.0, denoise: 0.875, sharp: 0.375, frameCount: 40, zslFrameCount: 40, nsFrameCount: 24, noiseModelEnabled: false, lutIndex: 0)
     ]
 
     static let shadowChasing: [CameraPreset] = definitions.map { d in
@@ -2297,7 +2307,19 @@ enum WatermarkRenderer {
                     opacity: opacity
                 )
             case .verticalRight:
-                drawCustomVertical(ctx: ctx.cgContext, size: size, title: titleText, subtitle: footerText, x: size.width - 18, fromLeft: false, titleFont: titleFont, infoFont: infoFont, accent: accent, opacity: opacity)
+                drawCustomVertical(
+                    ctx: ctx.cgContext,
+                    size: size,
+                    brand: preset.displayBrand,
+                    title: titleText,
+                    subtitle: footerText,
+                    x: size.width - 18,
+                    fromLeft: false,
+                    titleFont: titleFont,
+                    infoFont: infoFont,
+                    accent: accent,
+                    opacity: opacity
+                )
             case .bottom:
                 drawCustomBottom(ctx: ctx.cgContext, size: size, title: titleText, subtitle: footerText, titleFont: titleFont, infoFont: infoFont, accent: accent, opacity: opacity, band: true)
             case .minimal:
@@ -3215,7 +3237,6 @@ struct ContentView: View {
                             agcStore.sourceName = ""
                             agcStore.enabled = false
                             preset = PresetLibrary.all[0]
-                            profile = .natural
                         }
                     }
                 }
