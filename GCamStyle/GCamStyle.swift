@@ -1369,7 +1369,9 @@ final class CameraEngine: NSObject, ObservableObject {
                 watermarkConfig: watermarkConfig
             )
         }
-    }private func captureNow(
+    }
+
+    private func captureNow(
         preset: CameraPreset,
         mode: CaptureMode,
         watermark: Bool,
