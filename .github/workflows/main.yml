@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    name: Build unsigned IPA
+    name: Build GCamStyle IPA
     runs-on: macos-15
     timeout-minutes: 20
 
@@ -15,7 +15,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Xcode
+      - name: Show Xcode
         run: |
           xcodebuild -version
           xcode-select -p
@@ -45,25 +45,35 @@ jobs:
             AD_HOC_CODE_SIGNING_ALLOWED=NO \
             build
 
-      - name: Verify Mach-O
+      - name: Ad-hoc sign for resigning tools
         run: |
           APP="$RUNNER_TEMP/GCamDerivedData/Build/Products/Release-iphoneos/GCamStyle.app"
           test -d "$APP"
+          /usr/bin/codesign --force --deep --sign - "$APP"
+          /usr/bin/codesign --verify --deep --strict "$APP"
+          test -d "$APP/_CodeSignature"
+
+      - name: Verify Mach-O
+        run: |
+          APP="$RUNNER_TEMP/GCamDerivedData/Build/Products/Release-iphoneos/GCamStyle.app"
           test -f "$APP/GCamStyle"
           file "$APP/GCamStyle"
-          /usr/bin/codesign --display --verbose=4 "$APP" || true
+          /usr/bin/lipo -info "$APP/GCamStyle" || true
+          /usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$APP/Info.plist"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/Info.plist"
 
       - name: Package IPA
         run: |
-          rm -rf Payload GCamStyle-iOS-unsigned.ipa
+          APP="$RUNNER_TEMP/GCamDerivedData/Build/Products/Release-iphoneos/GCamStyle.app"
+          rm -rf Payload GCamStyle-iOS-resignable.ipa
           mkdir Payload
-          cp -R "$RUNNER_TEMP/GCamDerivedData/Build/Products/Release-iphoneos/GCamStyle.app" Payload/
-          /usr/bin/zip -qry GCamStyle-iOS-unsigned.ipa Payload
-          ls -lh GCamStyle-iOS-unsigned.ipa
+          cp -R "$APP" Payload/
+          /usr/bin/zip -qry GCamStyle-iOS-resignable.ipa Payload
+          ls -lh GCamStyle-iOS-resignable.ipa
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
-          name: GCamStyle-iOS-unsigned-IPA
-          path: GCamStyle-iOS-unsigned.ipa
+          name: GCamStyle-iOS-resignable-IPA
+          path: GCamStyle-iOS-resignable.ipa
           if-no-files-found: error
