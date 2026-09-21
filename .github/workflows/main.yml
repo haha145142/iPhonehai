@@ -63,9 +63,18 @@ jobs:
         run: |
           set -euxo pipefail
           APP="$RUNNER_TEMP/GCamDerivedData/Build/Products/Release-iphoneos/GCamStyle.app"
+          EXE="$APP/GCamStyle"
+
           /usr/bin/codesign --remove-signature "$APP" || true
-          /usr/bin/codesign --force --verbose --sign - "$APP"
-          /usr/bin/codesign --verify --deep --strict --verbose=2 "$APP"
+          /usr/bin/codesign --remove-signature "$EXE" || true
+
+          # Sign the main executable first, then the app bundle. This produces
+          # a valid temporary ad-hoc signature that resigning tools can replace.
+          /usr/bin/codesign --force --verbose --timestamp=none --sign - "$EXE"
+          /usr/bin/codesign --force --verbose --timestamp=none --sign - "$APP"
+
+          /usr/bin/codesign --display --verbose=4 "$APP"
+          /usr/bin/codesign --verify --strict --verbose=4 "$APP"
 
       - name: Package resignable IPA
         run: |
