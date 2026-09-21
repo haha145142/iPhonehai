@@ -269,6 +269,36 @@ final class LUTStore {
     }
 }
 
+struct AGCRenderProfile: Hashable, Sendable {
+    let index: Int
+    let title: String
+
+    let red: Float
+    let green: Float
+    let blue: Float
+    let saturation: Float
+
+    let contrast2: Float?
+    let blackLevel: Float?
+    let hdrPlus: Float?
+    let hdrMinus: Float?
+
+    let frameCount: Int?
+    let zslFrameCount: Int?
+    let nsFrameCount: Int?
+
+    let sharpGain: Float?
+    let darkerExposure: Float?
+
+    let tonePreset: Int?
+    let gammaPreset: Int?
+    let lutIndex: Int?
+
+    // 自定义 AGC 曲线的原始采样。
+    let toneCurve: [Float]
+    let gammaCurve: [Float]
+}
+
 struct CameraPreset: Identifiable, Hashable, Sendable {
     let id: String
     let brand: String
@@ -293,6 +323,7 @@ struct CameraPreset: Identifiable, Hashable, Sendable {
     let exifMake: String
     let exifModel: String
     let watermarkLayout: WatermarkLayout
+    let agcProfile: AGCRenderProfile? = nil
 
     var displayBrand: String {
         switch brand.uppercased() {
@@ -476,25 +507,22 @@ struct AGCConfig {
     func profileIndices() -> [Int] {
         var ids = Set<Int>()
 
-        if let count = int("pref_patch_profile_count_key"), count > 0 {
+        if let count = int("pref_patch_profile_count_key"), count > 0, count <= 256 {
             ids.formUnion(0..<count)
         }
 
-        // AGC 常见格式：任意配置键末尾带 _p<档案编号>_0。
-        // 不再只依赖某一个标题键。
-        let patterns = [
-            #"^.+_p(\d+)_0$"#,
-            #"^.+_profile_(\d+)_0$"#
-        ]
-
-        for pattern in patterns {
-            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+        let pattern = #"^lib_profile_title_key_p(\d+)_0$"#
+        if let regex = try? NSRegularExpression(pattern: pattern) {
             for key in values.keys {
                 let ns = key as NSString
                 let range = NSRange(location: 0, length: ns.length)
-                guard let match = regex.firstMatch(in: key, range: range),
-                      let numberRange = Range(match.range(at: 1), in: key),
-                      let id = Int(key[numberRange]) else { continue }
+                guard
+                    let match = regex.firstMatch(in: key, range: range),
+                    let numberRange = Range(match.range(at: 1), in: key),
+                    let id = Int(key[numberRange]),
+                    id >= 0,
+                    id <= 63
+                else { continue }
                 ids.insert(id)
             }
         }
@@ -613,6 +641,74 @@ final class AGCXMLParser: NSObject, XMLParserDelegate {
     }
 }
 
+enum AGCCurveDecoder {
+    static func decode(hex: String, title: String) -> (tone: [Float], gamma: [Float]) {
+        guard hex.count >= 32 else { return ([], []) }
+
+        var values: [Float] = []
+        values.reserveCapacity(hex.count / 16)
+
+        var index = hex.startIndex
+        while index < hex.endIndex {
+            let next = hex.index(index, offsetBy: 16, limitedBy: hex.endIndex) ?? hex.endIndex
+            guard next > index else { break }
+            let chunk = String(hex[index..<next])
+            if chunk.count == 16,
+               let bytes = Data(hexString: chunk) {
+                let value = bytes.withUnsafeBytes { raw -> Double in
+                    raw.load(as: Double.self)
+                }
+                if value.isFinite {
+                    values.append(Float(min(1.0, max(0.0, value))))
+                }
+            }
+            if next == hex.endIndex { break }
+            index = next
+        }
+
+        switch (values.count, title.lowercased()) {
+        case (17, let t) where t.contains("tone curve"):
+            return (values, [])
+        case (33, let t) where t.contains("gamma"):
+            return ([], values)
+        case (50, let t) where t.contains("tone") && t.contains("gamma"):
+            return (Array(values.prefix(25)), Array(values.suffix(25)))
+        case (57, _):
+            // 这类 AGC Curve 数据包含额外的控制点；最后 33 个值是最稳定的
+            // 输出段，在 iOS 曲线引擎中作为一维色调曲线。
+            return (Array(values.suffix(33)), [])
+        default:
+            return (values, [])
+        }
+    }
+}
+
+private extension Data {
+    init?(hexString: String) {
+        self.init()
+        let chars = Array(hexString.utf8)
+        guard chars.count % 2 == 0 else { return nil }
+        var index = 0
+        while index < chars.count {
+            let hi = Self.hexValue(chars[index])
+            let lo = Self.hexValue(chars[index + 1])
+            guard hi >= 0, lo >= 0 else { return nil }
+            append(UInt8((hi << 4) | lo))
+            index += 2
+        }
+    }
+
+    static func hexValue(_ c: UInt8) -> Int {
+        switch c {
+        case 48...57: return Int(c - 48)
+        case 65...70: return Int(c - 65 + 10)
+        case 97...102: return Int(c - 97 + 10)
+        default: return -1
+        }
+    }
+}
+
+
 enum AGCMapper {
     private static func clamp(_ value: Double, _ low: Double, _ high: Double) -> Double {
         min(high, max(low, value))
@@ -622,134 +718,134 @@ enum AGCMapper {
         value.isFinite ? value : fallback
     }
 
+    private static func firstNumber(_ config: AGCConfig, _ keys: [String], profile: Int, cameraIndex: Int = 0) -> Double? {
+        for key in keys {
+            if let value = config.profileNumber(key, profile: profile, cameraIndex: cameraIndex) {
+                return value
+            }
+        }
+        return nil
+    }
+
+    private static func firstInt(_ config: AGCConfig, _ keys: [String], profile: Int, cameraIndex: Int = 0) -> Int? {
+        for key in keys {
+            if let value = config.profileInt(key, profile: profile, cameraIndex: cameraIndex) {
+                return value
+            }
+        }
+        return nil
+    }
+
+    private static func cameraTitle(_ config: AGCConfig) -> String {
+        config.string("pref_config_filename_key")?.replacingOccurrences(of: ".agc", with: "") ?? "安卓配置"
+    }
+
+    private static func curve(for config: AGCConfig, profile: Int, cameraIndex: Int = 0) -> (tone: [Float], gamma: [Float]) {
+        for custom in 1...10 {
+            for slot in 0...5 {
+                let enabledKey = "lib_custom_(custom)_key_p(profile)_(slot)_enabled"
+                guard config.string(enabledKey) == "1" else { continue }
+                let title = config.string("lib_custom_(custom)_key_p(profile)_(slot)_title") ?? ""
+                let value = config.string("lib_custom_(custom)_key_p(profile)_(slot)_value") ?? ""
+                if !value.isEmpty {
+                    return AGCCurveDecoder.decode(hex: value, title: title)
+                }
+            }
+        }
+
+        // Some configs keep the active curve in a camera-specific slot.
+        for slot in 0...5 {
+            let value = config.string("lib_custom_1_key_p(profile)_(slot)_value") ?? ""
+            if !value.isEmpty {
+                let title = config.string("lib_custom_1_key_p(profile)_(slot)_title") ?? ""
+                return AGCCurveDecoder.decode(hex: value, title: title)
+            }
+        }
+
+        return ([], [])
+    }
+
     static func makePresets(from config: AGCConfig, fileName: String) -> [CameraPreset] {
-        let brand = config.string("info_brand_key") ?? config.string("info_manuf_key") ?? "安卓配置"
-        let model = config.string("info_model_key") ?? "通用配置"
-        let watermarkType = config.int("pref_watermark_type_key")
+        let sourceName = cameraTitle(config)
+        let watermarkType = config.int("pref_watermark_type_key") ?? 0
+        let ids = config.profileIndices()
+        let profileIDs = ids.isEmpty ? [0] : ids
 
-        let globalSaturation = config.number("lib_gpu_saturation_key") ?? 1.0
-        let globalVibrance = config.number("lib_gpu_vibrance_key") ?? 1.0
-        let globalContrast = config.number("lib_gpu_contrast_key") ?? 1.0
-        let globalHue = config.number("lib_gpu_hue_key") ?? 0.0
+        let globalHue = config.number("lib_gpu_hue_key") ?? 0
+        let globalVibrance = config.number("lib_gpu_vibrance_key") ?? 1
+        let globalContrast = config.number("lib_gpu_contrast_key") ?? 1
 
-        let profileIDs = config.profileIndices()
-        let ids = profileIDs.isEmpty ? [0] : profileIDs
-
-        return ids.map { index in
+        return profileIDs.map { index in
             let title = config.profileTitle(index)
 
-            let baseSaturation =
-                config.profileNumber("lib_pref_satcct_key", profile: index) ??
-                globalSaturation
-            let r =
-                config.profileNumber("lib_pref_red_coeff_key", profile: index) ??
-                config.profileNumber("lib_pref_satcct_r_key", profile: index) ??
-                1.0
-            let g =
-                config.profileNumber("lib_pref_green_coeff_key", profile: index) ??
-                config.profileNumber("lib_pref_satcct_g_key", profile: index) ??
-                1.0
-            let b =
-                config.profileNumber("lib_pref_blue_coeff_key", profile: index) ??
-                config.profileNumber("lib_pref_satcct_b_key", profile: index) ??
-                1.0
+            let red = Float(firstNumber(config, ["lib_pref_satcct_r_key"], profile: index) ?? 1)
+            let green = Float(firstNumber(config, ["lib_pref_satcct_g_key"], profile: index) ?? 1)
+            let blue = Float(firstNumber(config, ["lib_pref_satcct_b_key"], profile: index) ?? 1)
+            let sat = Float(clamp(
+                (firstNumber(config, ["lib_pref_satcct_c_key", "lib_gpu_saturation_key"], profile: index) ?? 1)
+                * (0.90 + globalVibrance * 0.10),
+                0.55, 1.55
+            ))
 
-            let saturation = clamp(
-                baseSaturation * (0.90 + globalVibrance * 0.10),
-                0.60,
-                1.45
-            )
+            let contrast2 = firstNumber(config, ["lib_contrast_2_key"], profile: index)
+            let black = firstNumber(config, ["lib_contrast_black_key"], profile: index)
+            let contrast = Float(clamp(
+                globalContrast * (0.92 + ((contrast2 ?? 0.46) - 0.46) * 0.70 + ((black ?? 0.85) - 0.85) * 0.12),
+                0.65, 1.45
+            ))
 
-            let c2 = config.profileNumber("lib_contrast_2_key", profile: index) ?? 0.46
-            let cb = config.profileNumber("lib_contrast_black_key", profile: index) ?? 0.85
-            let contrast = clamp(
-                globalContrast * (0.96 + (c2 - 0.46) * 0.55 + (cb - 0.85) * 0.18),
-                0.78,
-                1.30
-            )
+            let hdrPlus = firstNumber(config, ["lib_hdr_range_plus_key"], profile: index)
+            let hdrMinus = firstNumber(config, ["lib_hdr_range_minus_key"], profile: index)
 
-            let darkExposure =
-                config.profileNumber("lib_exposure_darker_key", profile: index) ??
-                config.number("lib_gpu_brightness_key") ?? 0.0
+            let highlights = Float(clamp(
+                0.85 - (hdrPlus ?? 5.0) * 0.038,
+                0.08, 0.92
+            ))
+            let shadows = Float(clamp(
+                0.16 + abs(hdrMinus ?? -2.0) * 0.060,
+                0.04, 0.75
+            ))
 
-            let tone = config.profileNumber("lib_tone_key", profile: index) ?? 15.0
-            let gamma = config.profileNumber("lib_gamma_key", profile: index) ?? 5.0
+            let frames = firstInt(config, [
+                "lib_pref_frame_count_key",
+                "lib_pref_frame_count_zsl_key",
+                "lib_pref_frame_count_ns_key"
+            ], profile: index)
 
-            let exposure = clamp(
-                finite(darkExposure * 0.02 + (tone - 15.0) * 0.006 + (gamma - 5.0) * 0.004, fallback: 0),
-                -1.0,
-                1.0
-            )
+            let sharp = firstNumber(config, [
+                "lib_sharp_gain_key",
+                "lib_sharpness_a_key",
+                "lib_gpu_sharpness_key",
+                "lib_sharp_gain_micro_key",
+                "lib_sharp_gain_macro_key"
+            ], profile: index)
 
-            let hdrPlus =
-                config.profileNumber("lib_hdr_range_plus_key", profile: index) ??
-                config.number("lib_hdr_range_plus_key") ?? 5.0
-            let hdrMinus =
-                config.profileNumber("lib_hdr_range_minus_key", profile: index) ??
-                config.number("lib_hdr_range_minus_key") ?? -3.0
+            let denoise = firstNumber(config, [
+                "lib_denoise_smoothing_key",
+                "lib_sabre_denoise_control_key",
+                "lib_noise_reduction_adjust_key"
+            ], profile: index) ?? 0
 
-            let highlights = clamp(0.78 - hdrPlus * 0.045, 0.18, 0.90)
-            let shadows = clamp(0.18 + abs(hdrMinus) * 0.055, 0.05, 0.65)
+            let darker = firstNumber(config, ["lib_exposure_darker_key"], profile: index)
+            let tonePreset = firstInt(config, ["lib_tone_curve_preset_key"], profile: index)
+            let gammaPreset = firstInt(config, ["lib_gamma_curve_preset_key"], profile: index)
+            let lutIndex = firstInt(config, ["lib_lut_key"], profile: index)
 
-            let sharp =
-                config.profileNumber("lib_sharp_gain_key", profile: index) ??
-                config.profileNumber("lib_sharpness_a_key", profile: index) ??
-                config.profileNumber("lib_gpu_sharpness_key", profile: index) ??
-                config.profileNumber("lib_sharp_gain_micro_key", profile: index) ??
-                config.profileNumber("lib_sharp_gain_macro_key", profile: index) ??
-                0.25
+            let tone = firstNumber(config, ["lib_tone_key"], profile: index) ?? 15
+            let gamma = firstNumber(config, ["lib_gamma_key"], profile: index) ?? 5
+            let exposure = Float(clamp(
+                finite((darker ?? 0) * 0.028 + (tone - 15) * 0.004 + (gamma - 5) * 0.003, fallback: 0),
+                -1.20, 1.20
+            ))
 
-            let frameCount =
-                config.profileInt("lib_pref_frame_count_key", profile: index) ??
-                config.profileInt("lib_pref_frame_count_zsl_key", profile: index) ??
-                config.profileInt("lib_pref_frame_count_ns_key", profile: index) ??
-                config.int("pref_frame_count_key")
+            let warmth = Float(clamp(Double(red - blue) * 7.5 + globalHue / 36.0, -12, 12))
+            let tint = Float(clamp(Double(green - (red + blue) / 2) * 6.0, -8, 8))
+            let sharpness = Float(clamp(
+                (sharp ?? 0.24) - denoise * 0.012,
+                0.05, 1.0
+            ))
 
-            let sharpness = clamp(
-                sharp * (frameCount.map { min(1.12, 1.0 + Double($0) / 240.0) } ?? 1.0),
-                0.05,
-                1.0
-            )
-
-            let denoise =
-                config.profileNumber("lib_noise_reduction_adjust_key", profile: index) ??
-                config.profileNumber("lib_denoise_key", profile: index) ??
-                config.profileNumber("lib_denoise_smoothing_key", profile: index) ??
-                config.profileNumber("lib_smoothing_sabre_key", profile: index) ??
-                config.number("lib_noise_reduction_adjust_key") ??
-                0.0
-
-            let colorTransform =
-                config.profileNumber("lib_pref_color_transform_key", profile: index) ??
-                config.number("lib_pref_color_transform_key") ??
-                0.0
-            let colorEnabled =
-                config.profileInt("lib_enable_color_key", profile: index) ??
-                config.int("lib_enable_color_key") ??
-                1
-
-            let warmth = clamp(
-                (r - b) * 8.0 +
-                globalHue / 30.0 +
-                (colorEnabled == 0 ? -1.0 : 0.0),
-                -12.0,
-                12.0
-            )
-            let tint = clamp(
-                (g - ((r + b) / 2.0)) * 6.0 +
-                (globalHue / 45.0) +
-                (colorTransform.truncatingRemainder(dividingBy: 7.0) - 3.0) * 0.22,
-                -8.0,
-                8.0
-            )
-
-            let isoValue = config.profileValue("lib_iso_key", profile: index)
-                ?? config.string("pref_iso_key")
-                ?? "自动"
-
-            let focal = config.string("pref_lens_title_key_2")
-                ?? config.string("pref_lens_title_key_4")
-                ?? "主摄"
+            let curves = curve(for: config, profile: index)
 
             let layout: WatermarkLayout
             switch watermarkType {
@@ -759,30 +855,68 @@ enum AGCMapper {
             default: layout = .bottomBand
             }
 
+            let profile = AGCRenderProfile(
+                index: index,
+                title: title,
+                red: red,
+                green: green,
+                blue: blue,
+                saturation: sat,
+                contrast2: contrast2.map(Float.init),
+                blackLevel: black.map(Float.init),
+                hdrPlus: hdrPlus.map(Float.init),
+                hdrMinus: hdrMinus.map(Float.init),
+                frameCount: frames,
+                zslFrameCount: config.profileInt("lib_pref_frame_count_zsl_key", profile: index),
+                nsFrameCount: config.profileInt("lib_pref_frame_count_ns_key", profile: index),
+                sharpGain: sharp.map(Float.init),
+                darkerExposure: darker.map(Float.init),
+                tonePreset: tonePreset,
+                gammaPreset: gammaPreset,
+                lutIndex: lutIndex,
+                toneCurve: curves.tone,
+                gammaCurve: curves.gamma
+            )
+
             return CameraPreset(
-                id: "agc-\(fileName)-p\(index)-\(UUID().uuidString)",
-                brand: brand,
-                model: "\(model) · \(title)",
-                lens: "\(focal) · \(fileName)",
-                focal: focal.contains("75") ? "75mm" : "28mm",
-                aperture: "F1.8",
-                iso: "ISO \(isoValue)",
+                id: "agc-(fileName)-p(index)-(UUID().uuidString)",
+                brand: "AGC",
+                model: title,
+                lens: sourceName,
+                focal: "主摄",
+                aperture: "自动",
+                iso: "自动",
                 shutter: "自动",
-                style: "安卓配置 · \(title)",
-                exposure: Float(exposure),
-                saturation: Float(saturation),
-                contrast: Float(contrast),
-                highlights: Float(highlights),
-                shadows: Float(shadows),
-                sharpness: Float(clamp(sharpness - denoise * 0.02, 0.05, 1.0)),
-                warmth: Float(warmth),
-                tint: Float(tint),
+                style: "安卓配置",
+                exposure: exposure,
+                saturation: sat,
+                contrast: contrast,
+                highlights: highlights,
+                shadows: shadows,
+                sharpness: sharpness,
+                warmth: warmth,
+                tint: tint,
                 channelBias: 0,
-                exifMake: brand,
-                exifModel: model,
-                watermarkLayout: layout
+                exifMake: "AGC",
+                exifModel: sourceName,
+                watermarkLayout: layout,
+                agcProfile: profile
             )
         }
+    }
+
+    static func defaultWatermarkConfig(from config: AGCConfig) -> (enabled: Bool, title: String, layout: CustomWatermarkLayout) {
+        let enabled = config.string("pref_photo_watermark_key") == "1"
+        let title = config.string("pref_watermark_title_key") ?? ""
+        let type = config.int("pref_watermark_type_key") ?? 0
+        let layout: CustomWatermarkLayout
+        switch type {
+        case 1: layout = .verticalLeft
+        case 2: layout = .verticalRight
+        case 3: layout = .topRight
+        default: layout = .bottom
+        }
+        return (enabled, title, layout)
     }
 }
 
@@ -1489,6 +1623,31 @@ enum PhotoProcessor {
         controls.brightness = 0
         current = controls.outputImage ?? current
 
+        if let agc = preset.agcProfile {
+            let matrix = CIFilter.colorMatrix()
+            matrix.inputImage = current
+            matrix.rVector = CIVector(x: CGFloat(agc.red), y: 0, z: 0, w: 0)
+            matrix.gVector = CIVector(x: 0, y: CGFloat(agc.green), z: 0, w: 0)
+            matrix.bVector = CIVector(x: 0, y: 0, z: CGFloat(agc.blue), w: 0)
+            current = matrix.outputImage ?? current
+
+            if let black = agc.blackLevel {
+                let lifted = CIFilter.colorControls()
+                lifted.inputImage = current
+                lifted.brightness = CGFloat(clampAGC(black))
+                lifted.saturation = 1
+                lifted.contrast = 1
+                current = lifted.outputImage ?? current
+            }
+
+            if !agc.toneCurve.isEmpty {
+                current = applyOneDimensionalCurve(current, points: agc.toneCurve)
+            }
+            if !agc.gammaCurve.isEmpty {
+                current = applyOneDimensionalCurve(current, points: agc.gammaCurve)
+            }
+        }
+
         let hs = CIFilter.highlightShadowAdjust()
         hs.inputImage = current
         hs.highlightAmount = preset.highlights
@@ -1513,6 +1672,51 @@ enum PhotoProcessor {
             current = applyLUT(current, lut: lut)
         }
         return current
+    }
+
+    private static func clampAGC(_ value: Float) -> Float {
+        // AGC 的黑位/对比参数并不是 iOS brightness 的同一量纲；
+        // 使用一个很小的可解释映射，避免把画面直接推爆。
+        return max(-0.18, min(0.18, (value - 0.85) * 0.035))
+    }
+
+    private static func applyOneDimensionalCurve(_ image: CIImage, points: [Float]) -> CIImage {
+        guard points.count >= 2 else { return image }
+        let dimension = 32
+        var cube = [Float]()
+        cube.reserveCapacity(dimension * dimension * dimension * 4)
+
+        for z in 0..<dimension {
+            let b = Float(z) / Float(dimension - 1)
+            for y in 0..<dimension {
+                let g = Float(y) / Float(dimension - 1)
+                for x in 0..<dimension {
+                    let r = Float(x) / Float(dimension - 1)
+                    let rr = sampleCurve(points, r)
+                    let gg = sampleCurve(points, g)
+                    let bb = sampleCurve(points, b)
+                    cube.append(rr)
+                    cube.append(gg)
+                    cube.append(bb)
+                    cube.append(1)
+                }
+            }
+        }
+
+        let data = cube.withUnsafeBufferPointer { Data(buffer: $0) }
+        guard let filter = CIFilter(name: "CIColorCube") else { return image }
+        filter.setValue(image, forKey: kCIInputImageKey)
+        filter.setValue(dimension, forKey: "inputCubeDimension")
+        filter.setValue(data, forKey: "inputCubeData")
+        return filter.outputImage ?? image
+    }
+
+    private static func sampleCurve(_ points: [Float], _ value: Float) -> Float {
+        let x = max(0, min(1, value)) * Float(points.count - 1)
+        let index = Int(floor(x))
+        if index >= points.count - 1 { return points.last ?? value }
+        let t = x - Float(index)
+        return points[index] + (points[index + 1] - points[index]) * t
     }
 
     private static func applyLUT(_ image: CIImage, lut: LUT3D) -> CIImage {
@@ -2389,7 +2593,7 @@ struct ContentView: View {
             List {
                 Section("已加载的安卓配置") {
                     if !agcStore.imported.isEmpty {
-                        Text("已加载 \(agcStore.imported.count) 个配置档案")
+                        Text("已加载 (agcStore.imported.count) 个配置档案")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
