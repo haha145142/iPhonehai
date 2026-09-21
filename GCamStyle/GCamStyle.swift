@@ -817,7 +817,7 @@ enum PhotoProcessor {
         return highlightShadow.outputImage ?? current
     }
 
-    static func applyLook(_ input: CIImage, preset: CameraPreset) {
+    static func applyLook(_ input: CIImage, preset: CameraPreset) -> CIImage {
         var current = input
 
         let exposure = CIFilter.exposureAdjust()
