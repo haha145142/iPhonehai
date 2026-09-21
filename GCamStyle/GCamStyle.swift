@@ -72,7 +72,7 @@ enum GCamProfile: String, CaseIterable, Identifiable {
     }
 }
 
-enum CaptureMode: CaseIterable, Identifiable {
+enum CaptureMode: CaseIterable, Identifiable, Sendable {
     case photo, proRAW, livePhoto
 
     var id: String { title }
@@ -86,7 +86,7 @@ enum CaptureMode: CaseIterable, Identifiable {
     }
 }
 
-enum WatermarkLayout: String, CaseIterable {
+enum WatermarkLayout: String, CaseIterable, Sendable {
     case verticalLeft
     case verticalRight
     case bottomBand
@@ -115,18 +115,18 @@ enum WatermarkLayout: String, CaseIterable {
     }
 }
 
-struct MetadataDraft: Hashable {
+struct MetadataDraft: Hashable, Sendable {
     var make = ""
     var model = ""
     var lens = ""
     var artist = ""
     var copyright = ""
-    var software = "GCamStyle iOS"
+    var software = "风格相机"
     var dateOriginal = ""
     var stripGPS = false
 }
 
-enum CustomWatermarkLayout: String, CaseIterable, Identifiable {
+enum CustomWatermarkLayout: String, CaseIterable, Identifiable, Sendable {
     case bottom
     case verticalLeft
     case verticalRight
@@ -148,7 +148,7 @@ enum CustomWatermarkLayout: String, CaseIterable, Identifiable {
     }
 }
 
-enum CustomFrameStyle: String, CaseIterable, Identifiable {
+enum CustomFrameStyle: String, CaseIterable, Identifiable, Sendable {
     case none
     case thin
     case bold
@@ -168,7 +168,7 @@ enum CustomFrameStyle: String, CaseIterable, Identifiable {
     }
 }
 
-struct CustomWatermarkConfig: Hashable {
+struct CustomWatermarkConfig: Hashable, Sendable {
     var title = ""
     var subtitle = ""
     var showParameters = true
@@ -189,7 +189,7 @@ struct CustomWatermarkConfig: Hashable {
     }
 }
 
-struct LUT3D: Hashable {
+struct LUT3D: Hashable, Sendable {
     let name: String
     let dimension: Int
     let cubeData: Data
@@ -269,7 +269,7 @@ final class LUTStore {
     }
 }
 
-struct CameraPreset: Identifiable, Hashable {
+struct CameraPreset: Identifiable, Hashable, Sendable {
     let id: String
     let brand: String
     let model: String
@@ -1940,27 +1940,45 @@ struct ContentView: View {
         .fileImporter(
             isPresented: $showAGCImporter,
             allowedContentTypes: [
-                UTType(filenameExtension: "agc") ?? .xml,
+                UTType(filenameExtension: "agc", conformingTo: .data) ?? .data,
                 .xml
             ],
-            allowsMultipleSelection: false
+            allowsMultipleSelection: true
         ) { result in
             do {
                 let urls = try result.get()
-                guard let url = urls.first else { return }
-                let accessing = url.startAccessingSecurityScopedResource()
-                defer { if accessing { url.stopAccessingSecurityScopedResource() } }
-                let data = try Data(contentsOf: url)
-                let config = try AGCXMLParser().parse(data)
-                let imported = AGCMapper.makePresets(from: config, fileName: url.lastPathComponent)
+                guard !urls.isEmpty else { return }
 
-                // 一个 .agc 可能包含十几个甚至二十多个 Profile，
-                // 这里全部导入，而不是只拿第一个。
-                agcStore.imported.insert(contentsOf: imported, at: 0)
-                if let first = imported.first {
-                    preset = first
+                var allImported: [CameraPreset] = []
+                var names: [String] = []
+
+                for url in urls {
+                    let accessing = url.startAccessingSecurityScopedResource()
+                    defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+
+                    let data = try Data(contentsOf: url)
+                    let config = try AGCXMLParser().parse(data)
+                    let imported = AGCMapper.makePresets(from: config, fileName: url.lastPathComponent)
+
+                    guard !imported.isEmpty else { continue }
+                    allImported.append(contentsOf: imported)
+                    names.append(url.deletingPathExtension().lastPathComponent)
                 }
+
+                guard !allImported.isEmpty else {
+                    throw NSError(
+                        domain: "GCamStyleAGC",
+                        code: 9,
+                        userInfo: [NSLocalizedDescriptionKey: "没有识别出可用的安卓配置档案。"]
+                    )
+                }
+
+                agcStore.imported.insert(contentsOf: allImported, at: 0)
+                agcStore.sourceName = names.joined(separator: "、")
+                agcStore.enabled = true
+                preset = allImported[0]
                 profile = .natural
+                camera.errorMessage = "已加载 (allImported.count) 个安卓配置档案。"
             } catch {
                 camera.errorMessage = "安卓配置导入失败：\(error.localizedDescription)"
             }
@@ -2376,7 +2394,7 @@ struct ContentView: View {
                     }
 
                     Stepper(
-                        "相框宽度 (Int(watermarkConfig.frameWidth))",
+                        "相框宽度 \(Int(watermarkConfig.frameWidth))",
                         value: $watermarkConfig.frameWidth,
                         in: 2...40,
                         step: 2
@@ -2399,7 +2417,7 @@ struct ContentView: View {
                     }
 
                     Stepper(
-                        "标志大小 (Int(watermarkConfig.logoScale * 100))%",
+                        "标志大小 \(Int(watermarkConfig.logoScale * 100))%",
                         value: $watermarkConfig.logoScale,
                         in: 0.08...0.40,
                         step: 0.02
@@ -2415,7 +2433,7 @@ struct ContentView: View {
                         Text("当前没有加载色彩曲线。")
                             .foregroundStyle(.secondary)
                     } else {
-                        Text("当前：(activeLUTName)")
+                        Text("当前：\(activeLUTName)")
                             .foregroundStyle(.secondary)
                     }
 
@@ -2471,6 +2489,8 @@ struct ContentView: View {
 @MainActor
 final class AGCStore: ObservableObject {
     @Published var imported: [CameraPreset] = []
+    @Published var enabled = false
+    @Published var sourceName = ""
 }
 
 @main
