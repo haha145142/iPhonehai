@@ -2,7 +2,7 @@ name: iPhonehai
 options:
   bundleIdPrefix: com.haha145142
   deploymentTarget:
-    iOS: "16.0"
+    iOS: "17.0"
   xcodeVersion: "27.0"
 targets:
   iPhonehai:
@@ -10,6 +10,8 @@ targets:
     platform: iOS
     sources:
       - path: iPhonehai
+    resources:
+      - path: iPhonehai/影踪追寻_通用配置.agc
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.haha145142.iphonehai
