@@ -1,148 +1,79 @@
-name: GCamStyle iOS Cloud Build
+name: Build iPhonehai IPA
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
-  workflow_dispatch:
 
 jobs:
   build:
-    name: Build resignable GCamStyle IPA
-    runs-on: xcode-27
-    timeout-minutes: 25
+    runs-on: macos-latest
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
 
-      - name: Show Xcode
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Validate project
         run: |
           set -euxo pipefail
-          xcodebuild -version
-          xcode-select -p
-          xcodebuild -showsdks | grep -E 'iphoneos|iPhoneOS' | tail -10 || true
+          xcodebuild -list -project iPhonehai.xcodeproj
+          test -f iPhonehai/iPhonehai/Config/AgcConfig.swift
+          test -f iPhonehai/iPhonehai/Processing/PhotoProcessor.swift
 
-      - name: Validate Xcode project
-        run: |
-          set -euxo pipefail
-          test -f GCamStyle.xcodeproj/project.pbxproj
-          test -f GCamStyle.xcodeproj/xcshareddata/xcschemes/GCamStyle.xcscheme
-          test -f GCamStyle/GCamStyle.swift
-          test -f GCamStyle/Info.plist
-          xcodebuild -project GCamStyle.xcodeproj -list
-
-      - name: Build device app
+      - name: Build device archive
         run: |
           set -o pipefail
-          rm -rf "$RUNNER_TEMP/GCamDerivedData" "$RUNNER_TEMP/xcodebuild.log"
-          xcodebuild \
-            -project GCamStyle.xcodeproj \
-            -scheme GCamStyle \
+          rm -rf build
+          xcodebuild archive \
+            -project iPhonehai.xcodeproj \
+            -scheme iPhonehai \
             -configuration Release \
-            -sdk iphoneos \
-            -derivedDataPath "$RUNNER_TEMP/GCamDerivedData" \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/iPhonehai.xcarchive \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            DEVELOPMENT_TEAM="" \
-            AD_HOC_CODE_SIGNING_ALLOWED=NO \
-            build 2>&1 | tee "$RUNNER_TEMP/xcodebuild.log"
+            CODE_SIGN_ENTITLEMENTS="" \
+            | tee build.log
 
-      - name: Verify app bundle
+      - name: Verify app
         run: |
           set -euxo pipefail
-          APP="$RUNNER_TEMP/GCamDerivedData/Build/Products/Release-iphoneos/GCamStyle.app"
+          APP="build/iPhonehai.xcarchive/Products/Applications/iPhonehai.app"
           test -d "$APP"
-          test -f "$APP/GCamStyle"
-          EXECUTABLE=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$APP/Info.plist")
-          IDENTIFIER=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/Info.plist")
-          test "$EXECUTABLE" = "GCamStyle"
-          test -f "$APP/$EXECUTABLE"
-          test "$IDENTIFIER" = "com.gcamstyle.ios"
-          file "$APP/GCamStyle"
-          /usr/bin/otool -hv "$APP/GCamStyle" | head -8
+          test -f "$APP/iPhonehai"
+          file "$APP/iPhonehai"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$APP/Info.plist"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/Info.plist"
 
-      - name: Package unsigned IPA
+      - name: Package IPA
         run: |
           set -euxo pipefail
-          APP="$RUNNER_TEMP/GCamDerivedData/Build/Products/Release-iphoneos/GCamStyle.app"
-          rm -rf Payload GCamStyle-iOS-unsigned.ipa
-          mkdir -p Payload
-          cp -R "$APP" Payload/
-          /usr/bin/zip -qry GCamStyle-iOS-unsigned.ipa Payload
-          /usr/bin/unzip -tq GCamStyle-iOS-unsigned.ipa
+          rm -rf build/Payload
+          mkdir -p build/Payload
+          cp -R "build/iPhonehai.xcarchive/Products/Applications/iPhonehai.app" build/Payload/
+          cd build
+          zip -qry iPhonehai-unsigned.ipa Payload
+          unzip -tq iPhonehai-unsigned.ipa
+          ls -lh iPhonehai-unsigned.ipa
 
-      - name: Create temporary ad-hoc signature
-        run: |
-          set -euxo pipefail
-          APP="$RUNNER_TEMP/GCamDerivedData/Build/Products/Release-iphoneos/GCamStyle.app"
-          EXE="$APP/GCamStyle"
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: iPhonehai-unsigned-ipa
+          path: build/iPhonehai-unsigned.ipa
+          if-no-files-found: error
 
-          /usr/bin/codesign --remove-signature "$APP" || true
-          /usr/bin/codesign --remove-signature "$EXE" || true
-
-          # Sign the main executable first, then the app bundle. This produces
-          # a valid temporary ad-hoc signature that resigning tools can replace.
-          /usr/bin/codesign --force --verbose --timestamp=none --sign - "$EXE"
-          /usr/bin/codesign --force --verbose --timestamp=none --sign - "$APP"
-
-          /usr/bin/codesign --display --verbose=4 "$APP"
-          /usr/bin/codesign --verify --strict --verbose=4 "$APP"
-
-      - name: Package resignable IPA
-        run: |
-          set -euxo pipefail
-          APP="$RUNNER_TEMP/GCamDerivedData/Build/Products/Release-iphoneos/GCamStyle.app"
-          rm -rf Payload GCamStyle-iOS-resignable.ipa
-          mkdir -p Payload
-          cp -R "$APP" Payload/
-          /usr/bin/zip -qry GCamStyle-iOS-resignable.ipa Payload
-          /usr/bin/unzip -tq GCamStyle-iOS-resignable.ipa
-          ls -lh GCamStyle-iOS-resignable.ipa
-
-      - name: iOS 27 simulator build smoke test
-        run: |
-          set -euxo pipefail
-
-          echo "可用 iOS 模拟器运行时："
-          /usr/bin/xcrun simctl list runtimes
-
-          echo "编译模拟器版本（不依赖模拟器启动）"
-          rm -rf "$RUNNER_TEMP/GCamSimulator"
-          xcodebuild \
-            -project GCamStyle.xcodeproj \
-            -scheme GCamStyle \
-            -configuration Debug \
-            -sdk iphonesimulator \
-            -destination 'generic/platform=iOS Simulator' \
-            -derivedDataPath "$RUNNER_TEMP/GCamSimulator" \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            build
-
-          test -d "$RUNNER_TEMP/GCamSimulator/Build/Products/Debug-iphonesimulator/GCamStyle.app"
-          test -f "$RUNNER_TEMP/GCamSimulator/Build/Products/Debug-iphonesimulator/GCamStyle.app/GCamStyle"
-
-      - name: Upload diagnostics
+      - name: Upload build log
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
-          name: GCamStyle-build-diagnostics
-          path: |
-            ${{ runner.temp }}/xcodebuild.log
-            ${{ runner.temp }}/GCamDerivedData/Build/Products/Release-iphoneos/GCamStyle.app/Info.plist
+          name: iPhonehai-build-log
+          path: build.log
           if-no-files-found: ignore
-
-      - name: Upload unsigned IPA
-        uses: actions/upload-artifact@v7
-        with:
-          name: GCamStyle-iOS-unsigned-IPA
-          path: GCamStyle-iOS-unsigned.ipa
-          if-no-files-found: error
-
-      - name: Upload resignable IPA
-        uses: actions/upload-artifact@v7
-        with:
-          name: GCamStyle-iOS-resignable-IPA
-          path: GCamStyle-iOS-resignable.ipa
-          if-no-files-found: error
