@@ -110,7 +110,7 @@ final class PhotoProcessor {
 
         return renderer.image { _ in
             UIColor.white.setFill()
-            CGRect(origin: .zero, size: size).fill()
+            UIRectFill(CGRect(origin: .zero, size: size))
             image.draw(in: CGRect(
                 x: margin,
                 y: margin,
