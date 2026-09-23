@@ -23,8 +23,8 @@ jobs:
         run: |
           set -euxo pipefail
           xcodebuild -list -project iPhonehai.xcodeproj
-          test -f iPhonehai/iPhonehai/Config/AgcConfig.swift
-          test -f iPhonehai/iPhonehai/Processing/PhotoProcessor.swift
+          test -f iPhonehai/Config/AgcConfig.swift
+          test -f iPhonehai/Processing/PhotoProcessor.swift
 
       - name: Build device archive
         run: |
